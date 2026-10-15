@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>译喵</string>
+	<key>CFBundleDisplayName</key>
+	<string>译喵</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.hannah-bbbb.yimiao</string>
+	<key>CFBundleExecutable</key>
+	<string>Yimiao</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- No Dock icon: he lives on the desktop and in the menu bar. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Lets the Base URL point at a model served on this Mac or the local network over plain HTTP. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- yimiao://translate?text=… hands him text from Shortcuts, Raycast, a script… -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>io.github.hannah-bbbb.yimiao</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>yimiao</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
