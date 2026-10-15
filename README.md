@@ -36,7 +36,7 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 
 | 操作 | 效果 |
 | --- | --- |
-| 选中文字 | 他跳到选区旁边翻译，说完回原位 |
+| 选中文字 | 他跳到选区旁边翻译，气泡避开原文，说完回原位 |
 | 点气泡 | 复制译文；有按钮时点按钮（看答案、重试、去设置…） |
 | 鼠标停在气泡上 | 气泡不消失 |
 | 单击猫 | 戳一下，同时收起气泡；睡着时是叫醒 |
@@ -47,6 +47,8 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 | 右键猫 / 菜单栏图标 | 睡觉、翻译剪贴板、设置、退出 |
 
 默认外语译成简体中文，中文译成英文，两个方向都能在设置里改。五分钟没有键鼠操作他会自己睡着，你回来时自己醒。
+
+气泡会按完整选区边界选择上下方或侧边空位，并为译文逐字增长预留空间；空间较小时使用紧凑气泡，长译文可以滚动。若当前屏幕没有空位，会尝试其他显示器；所有屏幕都放不下时，菜单栏出现「译文」，点击菜单里的「查看译文」查看或复制，不自动覆盖原文。读取不到选区边界时，鼠标拖选按经过的整段行区域避让；键盘或 Shift 扩选按焦点文本控件范围保守避让，因此气泡可能离原文更远。
 
 ## 他什么时候会主动开口
 
@@ -110,4 +112,15 @@ Sources/Yimiao/
 ```bash
 swift run Yimiao --snapshot poses.png
 swift run Yimiao --bubbles bubbles.png
+swift run Yimiao --selection-layouts .build/selection-layouts.png
 ```
+
+## 本地版本管理与变更规范
+
+项目使用本地 Git 仓库，主分支为 `main`，未配置远程仓库。历史见 `git log --oneline`，功能变更与验证记录见 [CHANGELOG.md](CHANGELOG.md)，后续开发入口见 [开发记忆/目录.md](开发记忆/目录.md)。
+
+- 每次提交只处理一个明确主题，标题使用 `fix(模块): 描述`、`feat(模块): 描述`、`docs: 描述` 或 `chore: 描述`。
+- 用户可感知的改动须更新 `CHANGELOG.md`，注明日期、行为变化、验证方式及未验证范围。
+- 提交前运行 `swift test` 和 `git diff --check`；交付可运行应用时再运行 `bash Scripts/build.sh`。
+- `.build/`、`build/`、本机环境文件和日志由 `.gitignore` 排除；API Key 继续只保存在系统钥匙串，不提交密钥或个人设置。
+- 用 `git status --short` 检查待提交内容，用 `git show <提交号>` 查看修改；回退已提交修复时优先使用 `git revert <提交号>`，保留历史记录。

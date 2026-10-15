@@ -8,9 +8,8 @@ import ApplicationServices
 /// clipboard back afterwards.
 @MainActor
 final class SelectionWatcher {
-    /// The selected text, and where the pointer let go of it. A selection made from the
-    /// keyboard has no such place.
-    var onSelection: ((String, CGPoint?) -> Void)?
+    /// Text, mouse release point (if any), and a protected rectangle in AppKit screen coordinates.
+    var onSelection: ((String, CGPoint?, CGRect?) -> Void)?
     /// Called when the user selected something but Accessibility access is missing.
     var onBlocked: (() -> Void)?
     /// Asked before every read, so a sleeping pet costs nothing.
@@ -62,7 +61,8 @@ final class SelectionWatcher {
         // A plain click only moves the caret; these three are the ways a mouse selects text.
         guard dragged || multiClick || event.modifierFlags.contains(.shift) else { return }
         // After a double-click, wait out a possible third click before reading.
-        check(after: multiClick ? 0.3 : 0.1, fromMouse: true)
+        check(after: multiClick ? 0.3 : 0.1, fromMouse: true,
+              extendsPrevious: event.modifierFlags.contains(.shift))
     }
 
     private func keyReleased(_ event: NSEvent) {
@@ -75,8 +75,9 @@ final class SelectionWatcher {
         check(after: 0.5, fromMouse: false)
     }
 
-    private func check(after delay: Double, fromMouse: Bool) {
+    private func check(after delay: Double, fromMouse: Bool, extendsPrevious: Bool = false) {
         let pointer = fromMouse ? NSEvent.mouseLocation : nil
+        let dragStart = pressPoint
         pending?.cancel()
         pending = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -93,21 +94,28 @@ final class SelectionWatcher {
             else { return }
             let pid = app.processIdentifier
             let bundleID = app.bundleIdentifier ?? ""
+            let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
 
             // Accessibility calls block on the other app, so they stay off the main thread.
             let answer = await Task.detached(priority: .userInitiated) {
                 Self.accessibilitySelection(pid: pid, bundleID: bundleID)
             }.value
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
 
             var text: String?
+            var bounds: CGRect?
+            var focusedBounds: CGRect?
             var route = "accessibility"
             switch answer {
-            case .text(let selected):
+            case .text(let selected, let rect, let focused):
                 text = selected
+                bounds = rect.flatMap { SelectionPlacement.appKitRect($0, primaryTop: primaryTop) }
+                focusedBounds = focused.flatMap { SelectionPlacement.appKitRect($0, primaryTop: primaryTop) }
             case .nothing:
                 break
-            case .unknown:
+            case .unknown(let rect, let focused):
+                bounds = rect.flatMap { SelectionPlacement.appKitRect($0, primaryTop: primaryTop) }
+                focusedBounds = focused.flatMap { SelectionPlacement.appKitRect($0, primaryTop: primaryTop) }
                 // Keyboard triggers never fall back: a stray ⌘C mid-typing is not worth the risk.
                 if fromMouse, self.allowsClipboardFallback(), !Self.neverCopyFrom.contains(bundleID) {
                     route = "clipboard"
@@ -117,19 +125,29 @@ final class SelectionWatcher {
                 }
             }
             Log.selection.notice("\(bundleID, privacy: .public) via \(route, privacy: .public): \(text?.count ?? 0) characters")
-            guard !Task.isCancelled, let text, !text.isEmpty else { return }
-            self.onSelection?(text, pointer)
+            guard !Task.isCancelled, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  let text, !text.isEmpty else { return }
+            if bounds == nil {
+                if let pointer, !extendsPrevious,
+                   let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) {
+                    bounds = SelectionPlacement.fallback(start: dragStart, end: pointer, screen: screen.frame)
+                } else {
+                    // A keyboard/shift extension can start anywhere in the focused text control.
+                    bounds = focusedBounds ?? NSScreen.main?.frame
+                }
+            }
+            self.onSelection?(text, pointer, bounds)
         }
     }
 
     // MARK: - Accessibility
 
     private enum Answer: Sendable {
-        case text(String)
+        case text(String, CGRect?, CGRect?)
         /// The app answered and nothing is selected.
         case nothing
         /// The app could not say either way.
-        case unknown
+        case unknown(CGRect?, CGRect?)
     }
 
     /// Apps where a synthetic ⌘C would copy files or do nothing useful.
@@ -145,29 +163,44 @@ final class SelectionWatcher {
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID()
-        else { return .unknown }
+        else { return .unknown(nil, nil) }
         let focused = unsafeDowncast(focusedRef, to: AXUIElement.self)
+        let focusedBounds = elementBounds(focused)
+        var range: CFTypeRef?
+        AXUIElementCopyAttributeValue(focused, kAXSelectedTextRangeAttribute as CFString, &range)
+        var bounds: CGRect?
+        if let range, CFGetTypeID(range) == AXValueGetTypeID() {
+            let value = unsafeDowncast(range, to: AXValue.self)
+            var characters = CFRange()
+            if AXValueGetType(value) == .cfRange, AXValueGetValue(value, .cfRange, &characters), characters.length > 0 {
+                bounds = rangeBounds(focused, parameter: range, attribute: kAXBoundsForRangeParameterizedAttribute as CFString)
+            }
+        }
+
+        var markers: CFTypeRef?
+        AXUIElementCopyAttributeValue(focused, "AXSelectedTextMarkerRange" as CFString, &markers)
+        if bounds == nil, let markers {
+            bounds = rangeBounds(focused, parameter: markers, attribute: "AXBoundsForTextMarkerRange" as CFString)
+        }
 
         var value: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &value)
         if status == .success, let selected = value as? String, !selected.isEmpty {
-            return .text(selected)
+            return .text(selected, bounds, focusedBounds)
         }
 
         // WebKit (Safari, Mail, …) describes a selection in page content as a pair of text
         // markers, and only hands over the string when asked for that range.
-        var markers: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focused, "AXSelectedTextMarkerRange" as CFString, &markers) == .success,
-           let markers {
+        if let markers {
             var string: CFTypeRef?
             let read = AXUIElementCopyParameterizedAttributeValue(
                 focused, "AXStringForTextMarkerRange" as CFString, markers, &string
             )
             if read == .success, let selected = string as? String {
-                return selected.isEmpty ? .nothing : .text(selected)
+                return selected.isEmpty ? .nothing : .text(selected, bounds, focusedBounds)
             }
         }
-        guard status == .success else { return .unknown }
+        guard status == .success else { return .unknown(bounds, focusedBounds) }
 
         // "Success, empty" is only trustworthy from real text controls and Apple's own web views.
         // Elsewhere it often just means the app does not report selections here.
@@ -177,7 +210,34 @@ final class SelectionWatcher {
         if textRoles.contains(role) || (role == "AXWebArea" && bundleID.hasPrefix("com.apple.")) {
             return .nothing
         }
-        return .unknown
+        return .unknown(bounds, focusedBounds)
+    }
+
+    nonisolated private static func rangeBounds(_ element: AXUIElement, parameter: CFTypeRef, attribute: CFString) -> CGRect? {
+        var result: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, attribute, parameter, &result) == .success,
+              let result, CFGetTypeID(result) == AXValueGetTypeID() else { return nil }
+        let value = unsafeDowncast(result, to: AXValue.self)
+        var rect = CGRect.zero
+        guard AXValueGetType(value) == .cgRect, AXValueGetValue(value, .cgRect, &rect),
+              rect.width > 0, rect.height > 0 else { return nil }
+        return rect
+    }
+
+    nonisolated private static func elementBounds(_ element: AXUIElement) -> CGRect? {
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let positionRef, let sizeRef,
+              CFGetTypeID(positionRef) == AXValueGetTypeID(), CFGetTypeID(sizeRef) == AXValueGetTypeID() else { return nil }
+        let positionValue = unsafeDowncast(positionRef, to: AXValue.self)
+        let sizeValue = unsafeDowncast(sizeRef, to: AXValue.self)
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionValue, .cgPoint, &position), AXValueGetValue(sizeValue, .cgSize, &size),
+              size.width > 0, size.height > 0 else { return nil }
+        return CGRect(origin: position, size: size)
     }
 
     // MARK: - Clipboard fallback

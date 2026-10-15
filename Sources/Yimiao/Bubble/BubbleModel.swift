@@ -33,6 +33,8 @@ final class BubbleModel: ObservableObject {
     @Published var tailX = BubbleLayout.windowSize.width / 2
     /// True when the bubble hangs below the pet instead of sitting above him.
     @Published var isBelow = false
+    /// A smaller scrollable bubble can fit beside a large selection.
+    @Published var windowSize = BubbleLayout.windowSize
     /// Where the card and each of its buttons sit inside the window, top-left origin, as the
     /// view last reported them. Clicks and hovering are worked out from these.
     var frames: [Target: CGRect] = [:]

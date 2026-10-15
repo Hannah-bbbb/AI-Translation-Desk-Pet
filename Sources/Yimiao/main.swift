@@ -3,6 +3,10 @@ import AppKit
 let arguments = CommandLine.arguments
 
 // Developer switches: render the artwork offscreen instead of launching the pet.
+if let flag = arguments.firstIndex(of: "--selection-layouts"), arguments.count > flag + 1 {
+    MainActor.assumeIsolated { Snapshot.writeSelectionLayouts(to: arguments[flag + 1]) }
+    exit(0)
+}
 if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 1 {
     Snapshot.writeSheet(to: arguments[flag + 1])
     exit(0)

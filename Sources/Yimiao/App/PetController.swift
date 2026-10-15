@@ -50,6 +50,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     private var leap: Leap?
     /// Seconds he has had nothing left to do at a selection.
     private var lingering = 0.0
+    /// Retained for the whole translation, including streaming and error messages.
+    private var protectedSelection: CGRect?
+    private var selectionAnchor: CGPoint?
+    private var bubbleHasNoSpace = false
 
     /// Video is on screen somewhere.
     private var isWatching = false
@@ -85,6 +89,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "译喵")
         icon?.isTemplate = true
         statusItem.button?.image = icon
+        statusItem.button?.imagePosition = .imageLeading
     }
 
     func start() {
@@ -95,7 +100,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         petWindow.orderFrontRegardless()
         bubbleWindow.orderFrontRegardless()
 
-        watcher.onSelection = { [weak self] in self?.translate($0, near: $1) }
+        watcher.onSelection = { [weak self] in self?.translate($0, near: $1, avoiding: $2) }
         watcher.isEnabled = { [weak self] in self?.brain.isAsleep == false }
         watcher.allowsClipboardFallback = { [weak self] in self?.settings.clipboardFallback ?? false }
         watcher.onBlocked = { [weak self] in self?.remindAboutPermission() }
@@ -144,9 +149,13 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         setClickThrough(petWindow, !(isDragging || brain.hitTest(local)))
         let bubbleFrame = bubbleWindow.frame
         let hovered = bubble.target(at: CGPoint(x: mouse.x - bubbleFrame.minX, y: bubbleFrame.maxY - mouse.y))
-        setClickThrough(bubbleWindow, hovered == nil)
+        setClickThrough(bubbleWindow, hovered == nil || bubbleHasNoSpace || bubbleWindow.alphaValue == 0)
         if bubble.hovered != hovered { bubble.hovered = hovered }
-        bubble.tick(dt: dt)
+        if !bubbleHasNoSpace { bubble.tick(dt: dt) }
+        if !bubble.isVisible, protectedSelection != nil {
+            clearSelectionPlacement()
+            layoutBubble()
+        }
         brain.bubbleBelow = bubble.isBelow
 
         sinceCheck += dt
@@ -224,6 +233,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         // Picked up mid-visit, mid-jump or out of hiding: wherever he is put down is home now.
         leap = nil
         isOut = false
+        clearSelectionPlacement()
         bubbleWindow.alphaValue = 1
         if isWatching { declinedHiding = true }
     }
@@ -252,6 +262,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             remark?.cancel()
             remark = nil
             bubble.hide()
+            clearSelectionPlacement()
             // He sleeps where he belongs, not wherever the last selection happened to be.
             if isOut { startLeap(to: restingPlace, isVisit: false) }
             brain.fallAsleep()
@@ -263,12 +274,12 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     // MARK: - Translation
 
     /// `pointer` is where a mouse selection ended, if that is how the text was chosen.
-    private func translate(_ raw: String, near pointer: CGPoint? = nil) {
+    private func translate(_ raw: String, near pointer: CGPoint? = nil, avoiding selection: CGRect? = nil) {
         guard !brain.isAsleep else { return }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard LanguageRouter.isWorthTranslating(text) else { return }
         // Re-selecting what is already on show should not flicker the bubble or cost a request.
-        if text == lastSource, bubble.isVisible { return }
+        if text == lastSource, bubble.isVisible, selection == protectedSelection { return }
         guard let route = LanguageRouter.route(
             text,
             primary: settings.primary,
@@ -279,6 +290,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         cancelTranslation()
         remark?.cancel()
         remark = nil
+        protectedSelection = selection ?? pointer.map {
+            CGRect(x: $0.x - 60, y: $0.y - 24, width: 120, height: 48)
+        }
+        selectionAnchor = pointer ?? selection.map { CGPoint(x: $0.midX, y: $0.midY) }
         layoutBubble()
         guard text.count <= Self.maxLength else {
             bubble.say("这段有 \(text.count) 个字，太长啦，我一次最多看 \(Self.maxLength) 字")
@@ -297,7 +312,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         let id = translationID
         Log.translation.notice("start: \(text.count) characters, \(route.caption, privacy: .public)")
         brain.notice()
-        if let pointer { visit(pointer) }
+        if selectionAnchor != nil { visitSelection() }
         bubble.begin(caption: route.caption)
         brain.activity = .thinking
 
@@ -499,31 +514,25 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     /// Hops next to the text that was just selected, so the translation appears where the
     /// eyes already are instead of over in his corner.
-    private func visit(_ pointer: CGPoint) {
+    private func visitSelection() {
         guard settings.visitsSelection, !isDragging else { return }
-        let scale = settings.petScale
-        let area = NSScreen.screens.first { $0.frame.contains(pointer) }?.visibleFrame
-            ?? (petWindow.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let head = PetRenderer.headTop * scale
-        // Just below the selection, with the bubble hanging under him, so neither covers what
-        // is being read. With no room down there, just above it instead.
-        let bubbleRoom = BubbleLayout.windowSize.height - BubbleLayout.margin * 2
-        var y = pointer.y - 26 - head
-        if y - bubbleRoom < area.minY { y = pointer.y + 34 }
-        let reach = 64 * scale
-        let target = CGPoint(
-            x: pointer.x.clamped(area.minX + reach...max(area.minX + reach, area.maxX - reach)),
-            y: y.clamped(area.minY...max(area.minY, area.maxY - head))
-        )
+        guard let placement = selectionPlacement else { return }
+        let target = placement.feet
         let feet = feetOnScreen
-        // Already close enough: shuffling a few points over would only be fidgeting.
-        guard hypot(target.x - feet.x, target.y - feet.y) > 60 else { return }
+        // Even a short correction matters when the old spot would cover the selected text.
+        guard hypot(target.x - feet.x, target.y - feet.y) > 1 else {
+            isOut = true
+            layoutBubble()
+            return
+        }
         // The bubble waits for him to land rather than flying along.
         bubbleWindow.alphaValue = 0
         startLeap(to: target, isVisit: true)
     }
 
     private func startLeap(to target: CGPoint, isVisit: Bool) {
+        // Keep source protection until the message is dismissed, even if video hiding
+        // moves the pet home while its translation is still visible.
         let from = feetOnScreen
         let distance = hypot(target.x - from.x, target.y - from.y)
         let duration = (0.28 + distance / 2600).clamped(0.28...0.6)
@@ -675,8 +684,53 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         layoutBubble()
     }
 
+    private var selectionPlacement: SelectionPlacement.Result? {
+        guard let selection = protectedSelection, let anchor = selectionAnchor else { return nil }
+        let allScreens = NSScreen.screens
+        let sourceScreen = allScreens.first { $0.frame.contains(anchor) }
+            ?? allScreens.first { $0.frame.intersects(selection) }
+        let screens = ([sourceScreen].compactMap { $0 } + allScreens.filter { $0 != sourceScreen }).map(\.visibleFrame)
+        return SelectionPlacement.place(avoiding: selection, near: anchor, screens: screens,
+                                        preferredSize: BubbleLayout.windowSize,
+                                        petHead: settings.visitsSelection ? PetRenderer.headTop * settings.petScale : 0,
+                                        petHalfWidth: settings.visitsSelection ? 64 * settings.petScale : 0)
+    }
+
+    private func clearSelectionPlacement() {
+        protectedSelection = nil
+        selectionAnchor = nil
+        bubbleHasNoSpace = false
+        statusItem.button?.title = ""
+        statusItem.length = NSStatusItem.squareLength
+        statusItem.button?.toolTip = "译喵"
+    }
+
     /// Parks the bubble window over his head or under his feet, whichever suits.
     private func layoutBubble() {
+        if protectedSelection != nil {
+            guard let placement = selectionPlacement else {
+                bubbleHasNoSpace = true
+                bubbleWindow.alphaValue = 0
+                statusItem.button?.title = "译文"
+                statusItem.length = NSStatusItem.variableLength
+                statusItem.button?.toolTip = "选区周围没有空位，点菜单查看译文"
+                return
+            }
+            bubbleHasNoSpace = false
+            statusItem.button?.title = ""
+            statusItem.length = NSStatusItem.squareLength
+            statusItem.button?.toolTip = "译喵"
+            if bubble.windowSize != placement.bubbleFrame.size { bubble.windowSize = placement.bubbleFrame.size }
+            bubbleWindow.setFrame(placement.bubbleFrame, display: true)
+            if bubble.isBelow != placement.isBelow { bubble.isBelow = placement.isBelow }
+            let tailX = placement.feet.x - placement.bubbleFrame.minX
+            if bubble.tailX != tailX { bubble.tailX = tailX }
+            bubbleWindow.alphaValue = leap == nil ? 1 : 0
+            return
+        }
+        if bubble.windowSize != BubbleLayout.windowSize { bubble.windowSize = BubbleLayout.windowSize }
+        bubbleWindow.setContentSize(BubbleLayout.windowSize)
+        bubbleWindow.alphaValue = leap == nil ? 1 : 0
         let feet = feetOnScreen
         let scale = settings.petScale
         let size = BubbleLayout.windowSize
@@ -701,6 +755,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if bubbleHasNoSpace, bubble.isVisible {
+            add(translation == nil ? "查看译文（选区周围无空位）…" : "查看正在生成的译文…", #selector(showUnobstructedTranslation))
+            menu.addItem(.separator())
+        }
         add(brain.isAsleep ? "叫醒他" : "哄他睡觉", #selector(toggleSleep))
         add("翻译剪贴板里的文字", #selector(translateClipboard))
         let due = vocabulary.words.filter { !$0.isLearned && $0.due <= Date() }.count
@@ -726,6 +784,37 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     @objc private func translateClipboard() {
         translateOnRequest(NSPasteboard.general.string(forType: .string) ?? "")
+    }
+
+    /// Only opens on an explicit click when no overlay can fit without obscuring the source.
+    @objc private func showUnobstructedTranslation() {
+        let wasTranslating = translation != nil
+        let displayedID = translationID
+        let alert = NSAlert()
+        alert.messageText = "译喵 · \(bubble.caption)"
+        alert.informativeText = translation == nil ? "选区周围没有空位，译文在这里查看。" : "翻译仍在生成，可稍后再次查看完整译文。"
+        let scroll = NSScrollView(frame: CGRect(x: 0, y: 0, width: 420, height: 260))
+        scroll.hasVerticalScroller = true
+        let text = NSTextView(frame: scroll.bounds)
+        text.isEditable = false
+        text.isVerticallyResizable = true
+        text.autoresizingMask = [.width]
+        text.font = .systemFont(ofSize: 14)
+        text.string = bubble.text.isEmpty ? "正在等待 AI 回应…" : bubble.text
+        scroll.documentView = text
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "关闭")
+        alert.addButton(withTitle: "复制")
+        NSApp.activate()
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text.string, forType: .string)
+        }
+        if !wasTranslating, translationID == displayedID {
+            bubble.hide()
+            clearSelectionPlacement()
+            layoutBubble()
+        }
     }
 
     /// Handles `yimiao://translate?text=…`, so other tools can hand him text. Optional `x` and
@@ -763,6 +852,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     @objc private func resetPosition() {
         leap = nil
         isOut = false
+        clearSelectionPlacement()
         bubbleWindow.alphaValue = 1
         spot = defaultSpot()
         petWindow.setFrameOrigin(origin(forFeet: restingPlace, scale: settings.petScale))

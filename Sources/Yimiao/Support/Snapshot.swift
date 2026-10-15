@@ -5,6 +5,65 @@ import UniformTypeIdentifiers
 
 /// Offscreen renders: contact sheets for eyeballing the artwork and the bubble, and the app icon.
 enum Snapshot {
+    /// Real bubble/pet rendering against selected-text fixtures: top, bottom, tall and wide.
+    @MainActor
+    static func writeSelectionLayouts(to path: String) {
+        _ = NSApplication.shared
+        let screen = CGRect(x: 0, y: 0, width: 960, height: 720)
+        let selections = [
+            CGRect(x: 320, y: 600, width: 300, height: 75),
+            CGRect(x: 320, y: 40, width: 300, height: 75),
+            CGRect(x: 350, y: 30, width: 230, height: 660),
+            CGRect(x: 0, y: 330, width: 960, height: 60),
+        ]
+        let ctx = makeContext(width: screen.width * 2, height: screen.height * 2, density: 1)
+        for (index, selection) in selections.enumerated() {
+            ctx.saveGState()
+            ctx.translateBy(x: CGFloat(index % 2) * screen.width, y: CGFloat(1 - index / 2) * screen.height)
+            ctx.setFillColor(CGColor(gray: index == 2 ? 0.16 : 0.95, alpha: 1))
+            ctx.fill(screen)
+            ctx.setStrokeColor(CGColor(gray: 0.6, alpha: 1))
+            ctx.stroke(screen.insetBy(dx: 1, dy: 1))
+            ctx.setFillColor(CGColor(srgbRed: 0.3, green: 0.6, blue: 0.95, alpha: 0.35))
+            ctx.fill(selection)
+            // Lines represent the protected source text, without depending on any user's content.
+            ctx.setStrokeColor(CGColor(gray: 0.35, alpha: 1))
+            for y in stride(from: selection.minY + 12, to: selection.maxY - 4, by: 16) {
+                ctx.move(to: CGPoint(x: selection.minX + 10, y: y))
+                ctx.addLine(to: CGPoint(x: selection.maxX - 10, y: y))
+            }
+            ctx.strokePath()
+            if let placement = SelectionPlacement.place(avoiding: selection,
+                near: CGPoint(x: selection.midX, y: selection.midY), screens: [screen],
+                preferredSize: BubbleLayout.windowSize, petHead: PetRenderer.headTop, petHalfWidth: 64) {
+                let model = BubbleModel()
+                model.windowSize = placement.bubbleFrame.size
+                model.isBelow = placement.isBelow
+                model.tailX = placement.feet.x - placement.bubbleFrame.minX
+                model.begin(caption: "英语 → 简体中文")
+                model.append(String(repeating: "这是一段用于验证气泡避让的长译文。原文选区应始终完整可见，空间不足时可滚动阅读译文。", count: index == 3 ? 6 : 2))
+                model.finish()
+                // ImageRenderer omits native scroll views. Render an offscreen hosting view
+                // so the compact long-text fixture verifies the actual scrolling content too.
+                let host = NSHostingView(rootView: BubbleView(model: model).environment(\.colorScheme, index == 2 ? .dark : .light))
+                let window = NSWindow(contentRect: CGRect(origin: .zero, size: model.windowSize),
+                                      styleMask: .borderless, backing: .buffered, defer: false)
+                window.contentView = host
+                host.frame = CGRect(origin: .zero, size: model.windowSize)
+                host.layoutSubtreeIfNeeded()
+                if let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                    host.cacheDisplay(in: host.bounds, to: bitmap)
+                    if let image = bitmap.cgImage { ctx.draw(image, in: placement.bubbleFrame) }
+                }
+                let origin = CGPoint(x: placement.feet.x - PetRenderer.feet.x,
+                                     y: placement.feet.y + PetRenderer.feet.y - PetRenderer.canvas.height)
+                draw(run(PetBrain(), 0.5), in: ctx, at: origin, scale: 1, density: 1)
+            }
+            ctx.restoreGState()
+        }
+        write(ctx, to: path)
+    }
+
     /// The speech bubble in each of its states, light and dark.
     @MainActor
     static func writeBubbles(to path: String) {

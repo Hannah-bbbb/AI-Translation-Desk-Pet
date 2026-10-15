@@ -10,8 +10,8 @@ enum BubbleLayout {
     static let maxTextSize = CGSize(width: 300, height: 230)
 
     /// Left edge of a card of the given width: centred on the tail, but kept inside the window.
-    static func cardX(width: CGFloat, tailX: CGFloat) -> CGFloat {
-        (tailX - width / 2).clamped(margin...max(margin, windowSize.width - margin - width))
+    static func cardX(width: CGFloat, tailX: CGFloat, windowWidth: CGFloat = windowSize.width) -> CGFloat {
+        (tailX - width / 2).clamped(margin...max(margin, windowWidth - margin - width))
     }
 }
 
@@ -24,16 +24,17 @@ struct BubbleView: View {
 
     var body: some View {
         let tailX = model.tailX
+        let windowWidth = model.windowSize.width
         ZStack(alignment: model.isBelow ? .topLeading : .bottomLeading) {
             Color.clear
             if model.isVisible {
                 card
-                    .alignmentGuide(.leading) { -BubbleLayout.cardX(width: $0.width, tailX: tailX) }
+                    .alignmentGuide(.leading) { -BubbleLayout.cardX(width: $0.width, tailX: tailX, windowWidth: windowWidth) }
                     .transition(.scale(scale: 0.5, anchor: model.isBelow ? .top : .bottom).combined(with: .opacity))
             }
         }
         .padding(.vertical, BubbleLayout.margin)
-        .frame(width: BubbleLayout.windowSize.width, height: BubbleLayout.windowSize.height)
+        .frame(width: model.windowSize.width, height: model.windowSize.height)
         .coordinateSpace(name: "window")
         .onPreferenceChange(TargetFramesKey.self) { model.frames = $0 }
         .animation(.spring(response: 0.3, dampingFraction: 0.68), value: model.isVisible)
@@ -104,7 +105,9 @@ struct BubbleView: View {
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
         // Short text hugs its content; anything taller than the limit scrolls.
-        return Hug(maxSize: BubbleLayout.maxTextSize) {
+        let maxSize = CGSize(width: min(BubbleLayout.maxTextSize.width, model.windowSize.width - 80),
+                             height: min(BubbleLayout.maxTextSize.height, model.windowSize.height - 110))
+        return Hug(maxSize: maxSize) {
             ViewThatFits(in: .vertical) {
                 text
                 ScrollView {
