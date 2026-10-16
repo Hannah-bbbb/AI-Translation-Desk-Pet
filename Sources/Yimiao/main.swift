@@ -11,6 +11,11 @@ if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 1
     Snapshot.writeSheet(to: arguments[flag + 1])
     exit(0)
 }
+// One-time move of preferences and API keys from an earlier bundle identifier.
+if let flag = arguments.firstIndex(of: "--import-from"), arguments.count > flag + 1 {
+    print(MainActor.assumeIsolated { Migration.importSettings(from: arguments[flag + 1]) })
+    exit(0)
+}
 if let flag = arguments.firstIndex(of: "--looks"), arguments.count > flag + 1 {
     Snapshot.writeLooks(to: arguments[flag + 1])
     exit(0)

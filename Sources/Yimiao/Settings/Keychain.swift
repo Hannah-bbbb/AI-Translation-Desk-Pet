@@ -3,14 +3,15 @@ import Security
 
 /// The API key lives in the login keychain rather than in a preferences file.
 enum Keychain {
-    private static func query(for provider: AIProvider) -> [String: Any] { [
+    /// `service` defaults to the app's bundle identifier; `Migration` reads an older one.
+    private static func query(for provider: AIProvider, service: String = AppIdentity.bundleID) -> [String: Any] { [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "io.github.hannah-bbbb.yimiao",
+        kSecAttrService as String: service,
         kSecAttrAccount as String: provider.keychainAccount,
     ] }
 
-    static func load(for provider: AIProvider) -> String {
-        var request = query(for: provider)
+    static func load(for provider: AIProvider, service: String = AppIdentity.bundleID) -> String {
+        var request = query(for: provider, service: service)
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?

@@ -2,6 +2,21 @@
 
 本文件记录可感知的功能变更、修复及兼容性影响；具体代码以 Git 提交为准。
 
+## 2026-10-16 · 应用标识符改为 io.github.hannah-bbbb.yimiao
+
+### 变化
+
+- 应用标识符、钥匙串服务名和日志子系统统一为 `io.github.hannah-bbbb.yimiao`；代码从 App 包读取标识符，fork 改名时只需修改 `Resources/Info.plist` 和 `Scripts/build.sh`。
+- 新增一次性导入命令 `Yimiao --import-from <旧标识符>`，把旧标识符下的设置和 API Key 搬到新标识符下，不覆盖已有内容。
+
+### 兼容性
+
+- 从旧标识符升级后，macOS 会把它当成新 App：需要在「系统设置 → 隐私与安全性 → 辅助功能」里重新打开译喵；导入 API Key 时系统会弹窗确认一次；如开启过「开机时启动」需重新打开。旧的辅助功能条目可以在列表里删掉。
+
+### 验证
+
+- `swift test` 通过；`Scripts/build.sh` 打出的 App 标识符和签名要求均为新标识符。
+
 ## 2026-10-16 · 更像一只猫
 
 ### 新增
