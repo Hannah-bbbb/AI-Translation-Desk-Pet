@@ -187,6 +187,39 @@ enum Snapshot {
         write(ctx, to: path)
     }
 
+    /// One row for the README: a different coat in each cell, each doing something else.
+    static func writeHero(to path: String) {
+        let stalking: (PetBrain) -> PetPose = { brain in
+            brain.mayPlay = true
+            var pose = PetPose()
+            var last = CGPoint(x: 140, y: -60)
+            for i in 0..<240 {
+                let point = CGPoint(x: 140 + sin(Double(i) / 60 * 2 * .pi * 2.2) * 60, y: -60)
+                brain.updateMouse(point, travel: abs(point.x - last.x), dt: 1.0 / 60)
+                last = point
+                pose = brain.tick(dt: 1.0 / 60)
+                if brain.isStalking, i > 200 { break }
+            }
+            return pose
+        }
+        let cells: [(Coat, (PetBrain) -> PetPose)] = [
+            (.orange, { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) }),
+            (.calico, { $0.celebrate(); return run($0, 0.3) }),
+            (.black, stalking),
+            (.tuxedo, { $0.hearsMusic = true; return run($0, 2.75) }),
+            (.white, { $0.fallAsleep(); return run($0, 7.3) }),
+        ]
+        let cell = PetRenderer.canvas
+        let ctx = makeContext(width: cell.width * CGFloat(cells.count), height: cell.height, density: 2)
+        ctx.setFillColor(CGColor(srgbRed: 0.93, green: 0.95, blue: 0.97, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: cell.width * CGFloat(cells.count), height: cell.height))
+        for (index, (coat, scene)) in cells.enumerated() {
+            let origin = CGPoint(x: CGFloat(index) * cell.width, y: 0)
+            draw(scene(PetBrain()), in: ctx, at: origin, scale: 1, density: 2, look: PetLook(coat: coat))
+        }
+        write(ctx, to: path)
+    }
+
     /// Every coat, bare and in each outfit, plus asleep in the nightcap.
     static func writeLooks(to path: String) {
         let outfits: [Outfit] = [.none, .santa, .witch, .newYear]

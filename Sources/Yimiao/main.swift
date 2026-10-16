@@ -16,6 +16,10 @@ if let flag = arguments.firstIndex(of: "--import-from"), arguments.count > flag 
     print(MainActor.assumeIsolated { Migration.importSettings(from: arguments[flag + 1]) })
     exit(0)
 }
+if let flag = arguments.firstIndex(of: "--hero"), arguments.count > flag + 1 {
+    Snapshot.writeHero(to: arguments[flag + 1])
+    exit(0)
+}
 if let flag = arguments.firstIndex(of: "--looks"), arguments.count > flag + 1 {
     Snapshot.writeLooks(to: arguments[flag + 1])
     exit(0)
