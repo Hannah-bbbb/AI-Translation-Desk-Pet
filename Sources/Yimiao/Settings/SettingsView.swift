@@ -126,7 +126,10 @@ struct SettingsView: View {
                 }
             }
 
-            Section("取词") {
+            Section {
+                Picker("什么时候翻译", selection: $settings.trigger) {
+                    ForEach(TranslationTrigger.allCases) { Text($0.name).tag($0) }
+                }
                 LabeledContent("辅助功能权限") {
                     if hasAccessibility {
                         Label("已授权", systemImage: "checkmark.circle.fill")
@@ -138,6 +141,13 @@ struct SettingsView: View {
                 Toggle(isOn: $settings.clipboardFallback) {
                     Text("兼容模式")
                     Text("Chrome、VS Code、微信等读不到选区的 App 里，替你按一下 ⌘C 取词，随后还原剪贴板")
+                }
+            } header: {
+                Text("取词")
+            } footer: {
+                if settings.trigger == .option {
+                    Text("按住 ⌥ 拖选、双击或用 ⇧ 方向键选中时才翻译。已经选好了也行：单独轻按一下 ⌥。")
+                        .font(.footnote)
                 }
             }
         }

@@ -15,21 +15,41 @@ final class SelectionWatcher {
     /// Asked before every read, so a sleeping pet costs nothing.
     var isEnabled: () -> Bool = { true }
     var allowsClipboardFallback: () -> Bool = { true }
+    /// When true, only selections made while holding ⌥ count, or ones followed by a tap of ⌥.
+    var requiresOption: () -> Bool = { false }
 
     private var monitors: [Any] = []
     private var pressPoint = CGPoint.zero
     private var pending: Task<Void, Never>?
+    private var optionTap = OptionTap()
+    /// The last selection made without ⌥, in case a tap of ⌥ follows to ask for it.
+    private var unclaimed: Gesture?
+
+    /// How a selection was made: where the pointer let go, if it was the mouse.
+    private struct Gesture {
+        var at = Date()
+        var pointer: CGPoint?
+        var dragStart: CGPoint
+        var extendsPrevious = false
+    }
 
     func start() {
         guard monitors.isEmpty else { return }
         listen(.leftMouseDown) { [weak self] _ in
             self?.pressPoint = NSEvent.mouseLocation
+            self?.optionTap.interrupted()
         }
         listen(.leftMouseUp) { [weak self] event in
             self?.mouseReleased(event)
         }
         listen(.keyUp) { [weak self] event in
             self?.keyReleased(event)
+        }
+        listen(.keyDown) { [weak self] _ in
+            self?.optionTap.interrupted()
+        }
+        listen(.flagsChanged) { [weak self] event in
+            self?.modifiersChanged(event)
         }
     }
 
@@ -60,9 +80,13 @@ final class SelectionWatcher {
         let multiClick = event.clickCount >= 2
         // A plain click only moves the caret; these three are the ways a mouse selects text.
         guard dragged || multiClick || event.modifierFlags.contains(.shift) else { return }
+        let gesture = Gesture(pointer: point, dragStart: pressPoint, extendsPrevious: event.modifierFlags.contains(.shift))
+        if requiresOption(), !event.modifierFlags.contains(.option) {
+            unclaimed = gesture
+            return
+        }
         // After a double-click, wait out a possible third click before reading.
-        check(after: multiClick ? 0.3 : 0.1, fromMouse: true,
-              extendsPrevious: event.modifierFlags.contains(.shift))
+        check(after: multiClick ? 0.3 : 0.1, gesture)
     }
 
     private func keyReleased(_ event: NSEvent) {
@@ -71,13 +95,32 @@ final class SelectionWatcher {
         let extendsSelection = flags.contains(.shift) && navigation.contains(event.keyCode)
         let selectsAll = flags.contains(.command) && event.keyCode == 0  // ⌘A
         guard extendsSelection || selectsAll else { return }
+        let gesture = Gesture(dragStart: pressPoint)
+        if requiresOption(), !flags.contains(.option) {
+            unclaimed = gesture
+            return
+        }
         // Long enough that holding ⇧→ across a sentence reads once, at the end.
-        check(after: 0.5, fromMouse: false)
+        check(after: 0.5, gesture)
     }
 
-    private func check(after delay: Double, fromMouse: Bool, extendsPrevious: Bool = false) {
-        let pointer = fromMouse ? NSEvent.mouseLocation : nil
-        let dragStart = pressPoint
+    /// In ⌥ mode, a quick tap of ⌥ on its own asks for the selection just made, or failing
+    /// that, whatever is selected right now.
+    private func modifiersChanged(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        guard optionTap.modifiersChanged(onlyOption: flags == .option, none: flags.isEmpty, at: event.timestamp),
+              requiresOption()
+        else { return }
+        let recent = unclaimed.flatMap { Date().timeIntervalSince($0.at) < 30 ? $0 : nil }
+        unclaimed = nil
+        check(after: 0.05, recent ?? Gesture(dragStart: pressPoint))
+    }
+
+    private func check(after delay: Double, _ gesture: Gesture) {
+        let pointer = gesture.pointer
+        let fromMouse = pointer != nil
+        let dragStart = gesture.dragStart
+        let extendsPrevious = gesture.extendsPrevious
         pending?.cancel()
         pending = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -285,5 +328,39 @@ final class SelectionWatcher {
         }
         if !items.isEmpty { pasteboard.writeObjects(items) }
         return text
+    }
+}
+
+/// Recognises ⌥ pressed and released on its own, quickly, with no other key or click between.
+struct OptionTap {
+    static let longest = 0.45
+
+    private var downAt: Double?
+    private var spoiled = false
+    private var wasNone = true
+
+    /// Feed every modifier change. Returns true on the release that completes a tap.
+    mutating func modifiersChanged(onlyOption: Bool, none: Bool, at time: Double) -> Bool {
+        defer { wasNone = none }
+        if onlyOption {
+            // Only a press from nothing counts; ⌘⌥ let go of ⌘-first is not a tap.
+            if downAt == nil, wasNone {
+                downAt = time
+                spoiled = false
+            }
+            return false
+        }
+        guard let start = downAt else { return false }
+        guard none else {
+            spoiled = true
+            return false
+        }
+        downAt = nil
+        return !spoiled && time - start <= Self.longest
+    }
+
+    /// Another key or a click while ⌥ was down: that was a shortcut, not a tap.
+    mutating func interrupted() {
+        if downAt != nil { spoiled = true }
     }
 }

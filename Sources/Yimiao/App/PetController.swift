@@ -104,6 +104,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         watcher.isEnabled = { [weak self] in self?.brain.isAsleep == false }
         watcher.allowsClipboardFallback = { [weak self] in self?.settings.clipboardFallback ?? false }
         watcher.onBlocked = { [weak self] in self?.remindAboutPermission() }
+        watcher.requiresOption = { [weak self] in self?.settings.trigger == .option }
         watcher.start()
         Log.selection.notice("launched, Accessibility access: \(self.hasAccessibility)")
 

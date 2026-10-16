@@ -39,6 +39,10 @@ final class Settings: ObservableObject {
     @Published var translatesPrimary: Bool {
         didSet { defaults.set(translatesPrimary, forKey: "translatesPrimary") }
     }
+    /// Translate every selection, or only those made while holding ⌥.
+    @Published var trigger: TranslationTrigger {
+        didSet { defaults.set(trigger.rawValue, forKey: "translationTrigger") }
+    }
     /// Whether to press ⌘C in apps that hide their selection from Accessibility.
     @Published var clipboardFallback: Bool {
         didSet { defaults.set(clipboardFallback, forKey: "clipboardFallback") }
@@ -117,6 +121,7 @@ final class Settings: ObservableObject {
             "primary": Language.chineseSimplified.rawValue,
             "secondary": Language.english.rawValue,
             "translatesPrimary": true,
+            "translationTrigger": TranslationTrigger.automatic.rawValue,
             "clipboardFallback": true,
             "autoSleepMinutes": 5,
             "petScale": 1.0,
@@ -144,6 +149,7 @@ final class Settings: ObservableObject {
         primary = Language(rawValue: defaults.string(forKey: "primary") ?? "") ?? .chineseSimplified
         secondary = Language(rawValue: defaults.string(forKey: "secondary") ?? "") ?? .english
         translatesPrimary = defaults.bool(forKey: "translatesPrimary")
+        trigger = TranslationTrigger(rawValue: defaults.string(forKey: "translationTrigger") ?? "") ?? .automatic
         clipboardFallback = defaults.bool(forKey: "clipboardFallback")
         autoSleepMinutes = defaults.integer(forKey: "autoSleepMinutes")
         petScale = defaults.double(forKey: "petScale").clamped(0.6...1.8)
@@ -201,5 +207,22 @@ final class Settings: ObservableObject {
         keySave?.cancel()
         keySave = nil
         storeKey(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), provider)
+    }
+}
+
+/// When a selection gets translated.
+enum TranslationTrigger: String, CaseIterable, Identifiable, Sendable {
+    /// Every selection.
+    case automatic
+    /// Only a selection made while holding ⌥, or followed by a tap of ⌥ on its own.
+    case option
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .automatic: "选中就翻译"
+        case .option: "按住 ⌥ 选中才翻译"
+        }
     }
 }
