@@ -8,16 +8,29 @@ import Foundation
 final class PetBrain {
     enum Activity { case idle, thinking, speaking }
     enum Gesture { case hop, wiggle, stretch, yawn, tilt, cheer }
+    /// How much battery the Mac has left, as he feels it.
+    enum Energy { case full, low, empty }
 
     var activity: Activity = .idle
     var isHeld = false
     /// Horizontal speed of the window while he is being carried, in design points per second.
     var carrySpeed = 0.0
+    /// Horizontal speed of the window he is sitting on, in design points per second.
+    var ride = 0.0
+    /// Whether he is free to stalk the cursor: the controller clears this while he has a job to do.
+    var mayPlay = false
+    /// A mouse button is down, so the cursor is selecting or dragging, not dangling a toy.
+    var mouseButtonDown = false
+    /// Something is playing sound and it is not a video.
+    var hearsMusic = false
+    var energy = Energy.full
     /// The bubble normally sits above his head; near the top of the screen it flips below.
     var bubbleBelow = false
     private(set) var isAsleep = false
     /// True while something is moving fast enough to deserve the display's full refresh rate.
     var isLively: Bool { livelyHold > 0 }
+    /// Bobbing along to music: smooth, regular motion that does not need the full rate.
+    var isGrooving: Bool { groove > 0 && stalk == nil && script == nil && !isHeld }
     private var livelyHold = 0.5
 
     private var springs = Channel.allCases.map { channel -> Spring in
@@ -46,6 +59,25 @@ final class PetBrain {
     private var script: Script?
     private var particles: [Particle] = []
 
+    private var teasing = Teasing()
+    /// Seconds into a stalk, while he is crouched and about to pounce.
+    private var stalk: Double?
+    private var stalkLength = 1.2
+    private var huntCooldown = 0.0
+    /// Where to pounce, in the same space as `updateMouse`, until the controller takes it.
+    private var pounceTarget: CGPoint?
+
+    private var keyTimes: [Double] = []
+    private var lastKey = -100.0
+    private var burstKeys = 0
+    private var tapSide = 1.0
+    private var fastSince: Double?
+    private var impressedCooldown = 0.0
+    private var puzzledCooldown = 30.0
+
+    private var groove = 0.0
+    private var noteTimer = 0.5
+
     // MARK: - Input
 
     /// `point` is the cursor in design points relative to the feet (y down); `travel` is how far it moved.
@@ -63,6 +95,75 @@ final class PetBrain {
         stillTime = 0
         if script?.yieldsToMouse == true { script = nil }
         if !isHeld, hitTest(point) { petMeter += travel }
+        if isTeasing(point) {
+            teasing.track(point.x, at: clock)
+        } else {
+            teasing.reset()
+        }
+    }
+
+    /// The cursor is dangling in front of him: close, not on him, and not dragging anything.
+    private func isTeasing(_ point: CGPoint) -> Bool {
+        !mouseButtonDown && abs(point.x) < 300 && point.y > -260 && point.y < 80 && !hitTest(point)
+    }
+
+    var isStalking: Bool { stalk != nil }
+
+    /// Where he wants to pounce, once. The controller jumps him there and then calls `landed`.
+    func takePounce() -> CGPoint? {
+        defer { pounceTarget = nil }
+        return pounceTarget
+    }
+
+    /// The end of a pounce. Caught means the cursor ended up under his paws.
+    func landed(caught: Bool) {
+        if caught {
+            happyTime = 1.1
+            script = .wiggle()
+            for i in 0..<4 {
+                let angle = -Double.pi * (0.2 + 0.2 * Double(i))
+                spawn(.spark, x: cos(angle) * 40, y: -40 + sin(angle) * 30, vx: cos(angle) * 50, vy: sin(angle) * 50, life: 0.6, size: 4)
+            }
+        } else {
+            script = .lookAround()
+        }
+        idleTimer = max(idleTimer, 3)
+    }
+
+    // MARK: - Typing
+
+    /// A key went down somewhere. Only the rhythm matters; he never knows which key.
+    func keyTapped() {
+        guard !isAsleep, !isHeld else { return }
+        keyTimes.append(clock)
+        keyTimes.removeAll { clock - $0 > 1.5 }
+        if clock - lastKey > 4 { burstKeys = 0 }
+        burstKeys += 1
+        lastKey = clock
+        // Someone typing is someone there: no drifting off into a daydream.
+        stillTime = min(stillTime, 3)
+        guard activity == .idle, stalk == nil, script?.interruptible ?? true else { return }
+        if typingRate >= 2 {
+            // The tail taps along and the head bobs, a little behind each key.
+            tapSide = -tapSide
+            kick(.tail, 1.4 * tapSide)
+            kick(.faceY, 0.8)
+        }
+    }
+
+    private var typingRate: Double {
+        Double(keyTimes.filter { clock - $0 <= 1.5 }.count) / 1.5
+    }
+
+    /// The Mac was plugged in.
+    func recharged() {
+        guard !isAsleep else { return }
+        interrupt()
+        script = .hop()
+        happyTime = 1.2
+        for i in 0..<3 {
+            spawn(.bolt, x: -34 + Double(i) * 34, y: -118 - Double(i % 2) * 10, vx: 0, vy: -22, life: 1.1, size: 8)
+        }
     }
 
     /// Whether a point (same space as `updateMouse`) lands on his body, ears included.
@@ -162,8 +263,9 @@ final class PetBrain {
         var t = Targets()
         t[.sleep] = sleepTarget
 
-        // Breathing never stops; asleep it is slower and deeper.
-        breath += dt * 2 * .pi / (2.8 + 1.8 * asleep)
+        // Breathing never stops; asleep it is slower and deeper, and slower again on a flat battery.
+        let tired = isAsleep ? 0 : (energy == .full ? 0 : (energy == .low ? 1 : 1.6))
+        breath += dt * 2 * .pi / (2.8 + 1.8 * asleep + 0.9 * tired)
         t[.squash] = 1 + sin(breath) * (0.012 + 0.018 * asleep) + 0.15 * asleep
         t[.earL] = 0.3 * asleep
         t[.earR] = 0.3 * asleep
@@ -172,6 +274,12 @@ final class PetBrain {
         t[.blush] = 0.3 * asleep
 
         if !isAsleep {
+            if tired > 0 {
+                // Heavy lids and drooping ears; blinks still close them all the way.
+                t[.eyeOpen] = energy == .low ? 0.62 : 0.45
+                t[.earL] += 0.15 * tired
+                t[.earR] += 0.15 * tired
+            }
             gaze(dt, &t)
             blink(dt, &t)
             switch activity {
@@ -204,7 +312,17 @@ final class PetBrain {
             t[.tail] = 0.3
         }
 
+        if abs(ride) > 4 {
+            // Riding a window: he leans back against the motion, ears flat.
+            t[.tilt] -= (ride / 2200).clamped(-0.32...0.32)
+            t[.earL] += min(0.3, abs(ride) / 4000)
+            t[.earR] += min(0.3, abs(ride) / 4000)
+        }
+
         pet(dt, &t)
+        hunt(dt, &t)
+        typing(dt)
+        dance(dt, &t)
         runScript(dt, &t)
         scheduleIdle(dt)
 
@@ -216,7 +334,7 @@ final class PetBrain {
             fastest = max(fastest, abs(springs[channel.rawValue].velocity))
         }
         // Breathing and the lazy tail sway stay far below this; blinks, bounces and tracking do not.
-        if fastest > 0.6 || lift > 0 || isHeld {
+        if fastest > 0.6 || lift > 0 || isHeld || stalk != nil {
             livelyHold = 0.5
         } else {
             livelyHold -= dt
@@ -324,6 +442,98 @@ final class PetBrain {
         t[.earR] += 0.12
     }
 
+    /// Crouch, stare, wiggle, pounce. A cursor waved back and forth in front of him starts it.
+    private func hunt(_ dt: Double, _ t: inout Targets) {
+        huntCooldown -= dt
+        let free = mayPlay && !isAsleep && !isHeld && activity == .idle && energy != .empty
+        if stalk == nil {
+            guard free, huntCooldown <= 0, happyTime <= 0, script?.interruptible ?? true, teasing.isTeasing(at: clock) else { return }
+            stalk = 0
+            stalkLength = Double.random(in: 0.9...1.5)
+            script = nil
+        }
+        guard var elapsed = stalk else { return }
+        // He loses interest if the toy stops, wanders off or lands on him.
+        let distance = hypot(mouse.x, mouse.y + 50)
+        if !free || stillTime > 1.2 || distance > 380 || hitTest(mouse) {
+            stalk = nil
+            teasing.reset()
+            huntCooldown = 1.5
+            return
+        }
+        elapsed += dt
+        stalk = elapsed
+
+        let crouch = ramp(elapsed, 0, 0.35)
+        let side = mouse.x >= 0 ? 1.0 : -1.0
+        t[.squash] += 0.22 * crouch
+        t[.faceY] += 0.5 * crouch
+        t[.pupil] = 1 + 0.45 * crouch
+        t[.eyeOpen] = 1
+        t[.earL] -= 0.12 * crouch
+        t[.earR] -= 0.12 * crouch
+        t[.tilt] += side * 0.05 * crouch
+        // The famous wiggle just before the jump.
+        let wiggle = ramp(elapsed, stalkLength - 0.6, stalkLength - 0.25)
+        t[.tilt] += sin(clock * 24) * 0.04 * wiggle
+        t[.tail] = 0.1 + sin(clock * 13) * 0.2
+
+        if elapsed >= stalkLength {
+            pounceTarget = mouse
+            stalk = nil
+            teasing.reset()
+            huntCooldown = 3.5
+        }
+    }
+
+    /// Sustained fast typing impresses him; a long pause after a burst puzzles him.
+    private func typing(_ dt: Double) {
+        impressedCooldown -= dt
+        puzzledCooldown -= dt
+        guard !isAsleep, activity == .idle, stalk == nil else { return }
+        if typingRate >= 6.5 {
+            fastSince = fastSince ?? clock
+        } else {
+            fastSince = nil
+        }
+        if let fastSince, clock - fastSince > 3, impressedCooldown <= 0 {
+            impressedCooldown = 60
+            happyTime = max(happyTime, 0.8)
+            kick(.pupil, 3)
+            for i in 0..<3 {
+                spawn(.spark, x: -30 + Double(i) * 30, y: -112, vx: 0, vy: -25, life: 0.7, size: 4)
+            }
+        }
+        let paused = clock - lastKey
+        if burstKeys >= 30, paused > 6, paused < 6.5, stillTime > 4, puzzledCooldown <= 0, script == nil {
+            puzzledCooldown = 120
+            burstKeys = 0
+            script = .headTilt(direction: Bool.random() ? 1 : -1, hold: 1.4)
+        }
+    }
+
+    /// Bobbing his head to whatever is playing, eyes closed half the time.
+    private func dance(_ dt: Double, _ t: inout Targets) {
+        guard hearsMusic, !isAsleep, !isHeld, activity == .idle, stalk == nil, energy != .empty else {
+            groove = 0
+            return
+        }
+        groove += dt
+        // About 114 beats a minute; real tempo is unknowable without listening, and this one suits most songs.
+        let beat = groove * 2 * .pi * 1.9
+        let nod = 0.5 - 0.5 * cos(beat)
+        t[.faceY] += 0.32 * nod
+        t[.squash] += 0.025 * nod
+        t[.tilt] += sin(beat / 2) * 0.045
+        t[.tail] = sin(beat / 2) * 0.24
+        if Int(groove / 4.2) % 2 == 1 { t[.joy] = 1 }
+        noteTimer -= dt
+        if noteTimer <= 0 {
+            noteTimer = Double.random(in: 1.2...2.0)
+            spawn(.note, x: Double.random(in: 28...48), y: -112, vx: Double.random(in: 4...12), vy: -24, life: 1.8, size: 6)
+        }
+    }
+
     private func runScript(_ dt: Double, _ t: inout Targets) {
         guard var running = script else { return }
         running.elapsed += dt
@@ -346,19 +556,22 @@ final class PetBrain {
             }
             return
         }
-        guard activity == .idle, happyTime <= 0 else { return }
+        // Dancing and stalking are busy enough without random fidgets on top.
+        guard activity == .idle, happyTime <= 0, stalk == nil, !hearsMusic else { return }
         idleTimer -= dt
         guard idleTimer <= 0 else { return }
         idleTimer = Double.random(in: 2.5...7)
 
+        // A flat battery makes him yawn more and hop less.
+        let lively = energy == .full ? 1.0 : 0.25
         var options: [(weight: Double, make: () -> Script)] = [
             (3, { .earTwitch(left: Bool.random()) }),
-            (2, { .hop() }),
-            (2, { .wiggle() }),
+            (2 * lively, { .hop() }),
+            (2 * lively, { .wiggle() }),
             (2, { .headTilt(direction: Bool.random() ? 1 : -1, hold: 1.1) }),
             (2, { .tailFlick(strength: 0.3) }),
             (1, { .stretch() }),
-            (0.7, { .yawn() }),
+            (energy == .full ? 0.7 : 3, { .yawn() }),
         ]
         if attention < 0.3 { options.append((4, { .lookAround() })) }
         let total = options.reduce(0) { $0 + $1.weight }
@@ -416,6 +629,51 @@ final class PetBrain {
 
     private func spawn(_ kind: Particle.Kind, x: Double, y: Double, vx: Double, vy: Double, life: Double, size: Double) {
         particles.append(Particle(kind: kind, x: x, y: y, vx: vx, vy: vy, life: life, size: size))
+    }
+}
+
+// MARK: - Teasing
+
+/// Spots a cursor being waved back and forth: several changes of direction within a couple of
+/// seconds, each after a real sweep rather than a jitter.
+struct Teasing {
+    /// A sweep shorter than this, in design points, is a wobble, not a wave.
+    static let minimumSweep = 14.0
+    static let window = 2.2
+    static let turnsNeeded = 4
+
+    private var extreme: Double?
+    private var direction = 0.0
+    private var turns: [Double] = []
+
+    mutating func track(_ x: Double, at time: Double) {
+        guard let edge = extreme else {
+            extreme = x
+            return
+        }
+        if direction == 0 {
+            // Waiting for the first real sweep to say which way the cursor is going.
+            if abs(x - edge) >= Self.minimumSweep {
+                direction = x > edge ? 1 : -1
+                extreme = x
+            }
+        } else if (x - edge) * direction > 0 {
+            // Still going the same way: the turning point moves along with it.
+            extreme = x
+        } else if abs(x - edge) >= Self.minimumSweep {
+            turns.append(time)
+            direction = -direction
+            extreme = x
+        }
+        turns.removeAll { time - $0 > Self.window }
+    }
+
+    func isTeasing(at time: Double) -> Bool {
+        turns.filter { time - $0 <= Self.window }.count >= Self.turnsNeeded
+    }
+
+    mutating func reset() {
+        self = Teasing()
     }
 }
 

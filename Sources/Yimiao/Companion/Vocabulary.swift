@@ -53,17 +53,20 @@ final class Vocabulary: ObservableObject {
         return text.count <= 40 && text.split(whereSeparator: \.isWhitespace).count <= 3
     }
 
-    func record(_ term: String, meaning: String, now: Date = Date()) {
+    /// Returns whether the word is new to the list, rather than looked up again.
+    @discardableResult
+    func record(_ term: String, meaning: String, now: Date = Date()) -> Bool {
         let due = now.addingTimeInterval(Double(Self.intervals[0]) * 86400)
+        defer { save() }
         if let index = words.firstIndex(where: { $0.id == term.lowercased() }) {
             words[index].meaning = meaning
             words[index].lookups += 1
             words[index].streak = 0
             words[index].due = due
-        } else {
-            words.append(Word(term: term, meaning: meaning, added: now, due: due))
+            return false
         }
-        save()
+        words.append(Word(term: term, meaning: meaning, added: now, due: due))
+        return true
     }
 
     /// The word that has been waiting longest for its review.

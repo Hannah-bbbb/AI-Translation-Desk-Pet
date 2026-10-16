@@ -11,8 +11,9 @@ enum Lines {
         """
 
     /// The situation, for the model.
-    static func brief(for occasion: Companion.Occasion, at date: Date, calendar: Calendar = .current) -> String {
-        let scene = switch occasion {
+    /// `day`, when given, is today's tally for him to work into the line.
+    static func brief(for occasion: Companion.Occasion, at date: Date, day: Companion.Day? = nil, calendar: Calendar = .current) -> String {
+        var scene = switch occasion {
         case .hello:
             "今天第一次见到主人，跟他打个招呼。"
         case .welcomeBack(let minutes):
@@ -29,6 +30,11 @@ enum Lines {
             "今天主人已经让你翻译了 \(count) 段文字，夸夸他，或者小小地邀个功。"
         case .quiz:
             "你想考考主人之前查过的生词。"
+        case .lowBattery(let percent):
+            "主人的笔记本电量只剩 \(percent)%，还没插电，提醒他充电。"
+        }
+        if let day {
+            scene += "今天你帮他翻译了 \(day.translations) 段，他查了 \(day.newWords) 个新词，中途休息了 \(day.breaks) 次，可以顺带提一句。"
         }
         let weekday = ["日", "一", "二", "三", "四", "五", "六"][(calendar.component(.weekday, from: date) + 6) % 7]
         let minute = Companion.minuteOfDay(date, calendar)
@@ -71,8 +77,16 @@ enum Lines {
             pool = ["今天已经帮你翻了 \(count) 段，辛苦啦", "第 \(count) 段了，今天你很用功嘛", "翻了 \(count) 段，我也算加班了喵"]
         case .quiz:
             pool = ["考考你"]
+        case .lowBattery(let percent):
+            pool = ["电量只剩 \(percent)% 了，快给我充电喵", "我快没电了……你也是吧？插个电", "\(percent)% 了！再不充电我要睡着了"]
         }
         return (pool.randomElement() ?? "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "今日小结：翻译 37 段 · 新词 5 个 · 休息 2 次", or nil before anything has happened.
+    static func summary(_ day: Companion.Day) -> String? {
+        guard day.translations + day.newWords + day.breaks > 0 else { return nil }
+        return "今日小结：翻译 \(day.translations) 段 · 新词 \(day.newWords) 个 · 休息 \(day.breaks) 次"
     }
 
     /// Cleans up a line from the model, or returns nil if it is not usable as one.

@@ -13,13 +13,17 @@ protocol PetViewDelegate: AnyObject {
 
 /// Draws the pet in step with the display and turns mouse input into clicks and drags.
 final class PetView: NSView {
-    enum Pace { case resting, lively }
+    enum Pace { case resting, steady, lively }
 
     weak var delegate: PetViewDelegate?
     var scale: CGFloat = 1 {
         didSet { configureStage() }
     }
-    /// How often to redraw. Breathing looks the same at 30 fps; eye tracking and bounces do not.
+    var look = PetLook() {
+        didSet { if look != oldValue { configureStage() } }
+    }
+    /// How often to redraw. Breathing looks the same at 30 fps and a steady head bob at 60;
+    /// eye tracking and bounces want everything the display has.
     var pace = Pace.lively {
         didSet { if pace != oldValue { applyPace() } }
     }
@@ -65,12 +69,13 @@ final class PetView: NSView {
     }
 
     private func configureStage() {
-        stage.configure(scale: scale, density: window?.backingScaleFactor ?? 2)
+        stage.configure(scale: scale, density: window?.backingScaleFactor ?? 2, look: look)
     }
 
     private func applyPace() {
         link?.preferredFrameRateRange = switch pace {
         case .resting: CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
+        case .steady: CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         case .lively: CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         }
     }

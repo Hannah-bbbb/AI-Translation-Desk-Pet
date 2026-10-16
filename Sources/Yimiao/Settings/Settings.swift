@@ -59,6 +59,30 @@ final class Settings: ObservableObject {
         didSet { defaults.set(visitsSelection, forKey: "visitsSelection") }
     }
 
+    @Published var coat: Coat {
+        didSet { defaults.set(coat.rawValue, forKey: "coat") }
+    }
+    @Published var outfit: OutfitChoice {
+        didSet { defaults.set(outfit.rawValue, forKey: "outfit") }
+    }
+    /// Stalking and pouncing on a cursor waved in front of him.
+    @Published var playsWithCursor: Bool {
+        didSet { defaults.set(playsWithCursor, forKey: "playsWithCursor") }
+    }
+    @Published var reactsToTyping: Bool {
+        didSet { defaults.set(reactsToTyping, forKey: "reactsToTyping") }
+    }
+    @Published var dancesToMusic: Bool {
+        didSet { defaults.set(dancesToMusic, forKey: "dancesToMusic") }
+    }
+    @Published var reactsToBattery: Bool {
+        didSet { defaults.set(reactsToBattery, forKey: "reactsToBattery") }
+    }
+    /// Now and then he hops up and sits on top of the window you are working in.
+    @Published var sitsOnWindows: Bool {
+        didSet { defaults.set(sitsOnWindows, forKey: "sitsOnWindows") }
+    }
+
     /// Whether he ducks to the screen edge while a video is playing.
     @Published var hidesForVideo: Bool {
         didSet { defaults.set(hidesForVideo, forKey: "hidesForVideo") }
@@ -99,6 +123,10 @@ final class Settings: ObservableObject {
     @Published var quizzes: Bool {
         didSet { defaults.set(quizzes, forKey: "quizzes") }
     }
+    /// Adds today's tally to the end-of-day reminder.
+    @Published var dailySummary: Bool {
+        didSet { defaults.set(dailySummary, forKey: "dailySummary") }
+    }
 
     private let defaults: UserDefaults
     private let loadKey: (AIProvider) -> String
@@ -126,6 +154,13 @@ final class Settings: ObservableObject {
             "autoSleepMinutes": 5,
             "petScale": 1.0,
             "visitsSelection": true,
+            "coat": Coat.orange.rawValue,
+            "outfit": OutfitChoice.festival.rawValue,
+            "playsWithCursor": true,
+            "reactsToTyping": true,
+            "dancesToMusic": true,
+            "reactsToBattery": true,
+            "sitsOnWindows": true,
             "hidesForVideo": true,
             "speaksUp": true,
             "greets": true,
@@ -137,6 +172,7 @@ final class Settings: ObservableObject {
             "writesOwnLines": true,
             "keepsVocabulary": true,
             "quizzes": true,
+            "dailySummary": true,
         ])
         // When launched from a terminal with no key saved yet, the conventional variable works too.
         let selected = AIProvider(rawValue: defaults.string(forKey: "aiProvider") ?? "") ?? .deepseek
@@ -154,6 +190,13 @@ final class Settings: ObservableObject {
         autoSleepMinutes = defaults.integer(forKey: "autoSleepMinutes")
         petScale = defaults.double(forKey: "petScale").clamped(0.6...1.8)
         visitsSelection = defaults.bool(forKey: "visitsSelection")
+        coat = Coat(rawValue: defaults.string(forKey: "coat") ?? "") ?? .orange
+        outfit = OutfitChoice(rawValue: defaults.string(forKey: "outfit") ?? "") ?? .festival
+        playsWithCursor = defaults.bool(forKey: "playsWithCursor")
+        reactsToTyping = defaults.bool(forKey: "reactsToTyping")
+        dancesToMusic = defaults.bool(forKey: "dancesToMusic")
+        reactsToBattery = defaults.bool(forKey: "reactsToBattery")
+        sitsOnWindows = defaults.bool(forKey: "sitsOnWindows")
         hidesForVideo = defaults.bool(forKey: "hidesForVideo")
         speaksUp = defaults.bool(forKey: "speaksUp")
         greets = defaults.bool(forKey: "greets")
@@ -165,6 +208,7 @@ final class Settings: ObservableObject {
         writesOwnLines = defaults.bool(forKey: "writesOwnLines")
         keepsVocabulary = defaults.bool(forKey: "keepsVocabulary")
         quizzes = defaults.bool(forKey: "quizzes")
+        dailySummary = defaults.bool(forKey: "dailySummary")
     }
 
     var translatorConfig: TranslatorConfig {

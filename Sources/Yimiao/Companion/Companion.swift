@@ -18,6 +18,8 @@ struct Companion {
         case busyDay(translations: Int)
         /// A word from the vocabulary list is due for review.
         case quiz
+        /// The battery is nearly flat and the Mac is not plugged in.
+        case lowBattery(percent: Int)
     }
 
     struct Preferences {
@@ -37,6 +39,30 @@ struct Companion {
         var greeted = false
         var saidOffWork = false
         var translations = 0
+        /// Words added to the vocabulary list today.
+        var newWords = 0
+        /// Times the user stepped away for a while and came back.
+        var breaks = 0
+
+        init(date: String = "") {
+            self.date = date
+        }
+
+        // Days saved by an earlier version lack the newer counts; they start from zero
+        // instead of the whole day being thrown away (which would earn a second hello).
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            date = try container.decodeIfPresent(String.self, forKey: .date) ?? ""
+            greeted = try container.decodeIfPresent(Bool.self, forKey: .greeted) ?? false
+            saidOffWork = try container.decodeIfPresent(Bool.self, forKey: .saidOffWork) ?? false
+            translations = try container.decodeIfPresent(Int.self, forKey: .translations) ?? 0
+            newWords = try container.decodeIfPresent(Int.self, forKey: .newWords) ?? 0
+            breaks = try container.decodeIfPresent(Int.self, forKey: .breaks) ?? 0
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case date, greeted, saidOffWork, translations, newWords, breaks
+        }
     }
 
     // Seconds, unless named otherwise.
@@ -73,6 +99,8 @@ struct Companion {
     }
 
     private var lastSeen: Date?
+    /// Which day `lastSeen` fell on, so a night away is not counted as a break.
+    private var lastSeenDate: String?
     private var stretchStart: Date?
     private var arrival: Arrival?
     /// Break suggestions made during the current stretch of work.
@@ -82,6 +110,7 @@ struct Companion {
     private var lastQuiz: Date?
     private var lastSpoke: Date?
     private var milestone: Int?
+    private var lowBattery: Int?
 
     init(day: Day = Day()) {
         self.day = day
@@ -104,7 +133,9 @@ struct Companion {
         guard idle < Self.presence else { return nil }
 
         let absence = lastSeen.map { now.timeIntervalSince($0) }
+        if let absence, absence >= Self.breakGap, lastSeenDate == day.date { day.breaks += 1 }
         lastSeen = now
+        lastSeenDate = day.date
         if absence ?? .infinity >= Self.breakGap {
             arrival = Arrival(at: now, minutesAway: absence.map { Int($0 / 60) }, afterNudge: nudges > 0)
             stretchStart = now
@@ -137,6 +168,8 @@ struct Companion {
             milestone = nil
         case .quiz:
             lastQuiz = now
+        case .lowBattery:
+            lowBattery = nil
         }
         lastSpoke = now
         return occasion
@@ -149,11 +182,28 @@ struct Companion {
         if Self.milestones.contains(day.translations) { milestone = day.translations }
     }
 
+    /// Counts a word newly added to the vocabulary list.
+    mutating func learnedWord(now: Date, calendar: Calendar = .current) {
+        rollOver(now, calendar)
+        day.newWords += 1
+    }
+
+    /// The battery dropped low while unplugged. He mentions it at the next chance.
+    mutating func batteryLow(percent: Int) {
+        lowBattery = percent
+    }
+
+    /// Plugged in after all: nothing left to say about it.
+    mutating func batteryRecovered() {
+        lowBattery = nil
+    }
+
     /// The most pressing thing he could say right now, if anything.
     private func due(_ now: Date, _ preferences: Preferences, _ hasDueWord: Bool, _ calendar: Calendar) -> Occasion? {
         let minute = Self.minuteOfDay(now, calendar)
         let lateNight = preferences.bedtimeMinute.map { Self.isPastBedtime(minute, bedtime: $0) } ?? false
 
+        if let lowBattery { return .lowBattery(percent: lowBattery) }
         if let arrival {
             if preferences.greets, !day.greeted { return .hello }
             if preferences.greets, let away = arrival.minutesAway, away >= Self.longAbsenceMinutes {

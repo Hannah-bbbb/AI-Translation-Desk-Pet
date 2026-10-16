@@ -55,6 +55,31 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     private var selectionAnchor: CGPoint?
     private var bubbleHasNoSpace = false
 
+    /// The current outing is play (a pounce), not a selection: he lingers longer before going home.
+    private var playingOut = false
+    /// The leap under way is a pounce, to be judged a catch or a miss on landing.
+    private var pouncing = false
+
+    /// The window he is sitting on, if any.
+    private var seat: Seat?
+    private var nextSeat = Date().addingTimeInterval(.random(in: 4 * 60...9 * 60))
+
+    private struct Seat {
+        let windowID: CGWindowID
+        /// How far along the window's top edge he sits, so he keeps his place when it is resized.
+        let fraction: CGFloat
+        let until: Date
+        var frame: CGRect
+        var feet: CGPoint
+    }
+
+    private var musicFor = 0
+    private var silenceFor = 0
+    private var batteryCheck = 0
+    private var lookCheck = 0
+    private var battery: Battery.Reading?
+    private var warnedAboutBattery = false
+
     /// Video is on screen somewhere.
     private var isWatching = false
     /// The user called him out during this video, so he stays out until it ends.
@@ -65,7 +90,8 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     /// One jump across the screen, in screen coordinates of his feet.
     private struct Leap {
         let from: CGPoint
-        let to: CGPoint
+        /// Moves along if the window he is jumping onto moves.
+        var to: CGPoint
         let duration: Double
         /// Height of the arc at its peak.
         let rise: CGFloat
@@ -105,12 +131,22 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         watcher.allowsClipboardFallback = { [weak self] in self?.settings.clipboardFallback ?? false }
         watcher.onBlocked = { [weak self] in self?.remindAboutPermission() }
         watcher.requiresOption = { [weak self] in self?.settings.trigger == .option }
+        watcher.onKeyDown = { [weak self] in
+            guard let self, self.settings.reactsToTyping else { return }
+            self.brain.keyTapped()
+        }
         watcher.start()
         Log.selection.notice("launched, Accessibility access: \(self.hasAccessibility)")
 
         settings.$petScale.dropFirst().removeDuplicates()
             .sink { [weak self] in self?.applyScale($0) }
             .store(in: &subscriptions)
+        // `@Published` fires before the property changes, so read the new values on the next turn.
+        settings.$coat.combineLatest(settings.$outfit).dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.applyLook() }
+            .store(in: &subscriptions)
+        applyLook()
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -127,6 +163,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     func petView(_ view: PetView, poseAfter dt: Double) -> PetPose {
         advanceLeap(dt)
+        followSeat(dt)
         settle(dt)
 
         let scale = settings.petScale
@@ -158,20 +195,28 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             layoutBubble()
         }
         brain.bubbleBelow = bubble.isBelow
+        brain.mayPlay = canPlay
+        brain.mouseButtonDown = NSEvent.pressedMouseButtons & 1 != 0
+        if let target = brain.takePounce() { pounce(at: target) }
 
         sinceCheck += dt
         if sinceCheck >= 1 {
             sinceCheck = 0
             let anyInput = CGEventType(rawValue: ~0)!
             let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+            let videoOn = Playback.isVideoPlaying()
             checkPermission()
-            checkVideo()
+            checkVideo(videoOn)
+            checkMusic(videoOn)
+            checkBattery()
+            checkSeat(idle)
+            checkLook()
             checkIdle(idle)
             // Watching something is sitting at the screen, not being away from it.
             checkRhythm(isWatching ? 0 : idle)
         }
         let pose = brain.tick(dt: dt)
-        view.pace = brain.isLively ? .lively : .resting
+        view.pace = !brain.isLively ? .resting : (brain.isGrooving && leap == nil && !isDragging ? .steady : .lively)
         return pose
     }
 
@@ -231,9 +276,13 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     func petViewDragBegan(_ view: PetView) {
         isDragging = true
         brain.isHeld = true
-        // Picked up mid-visit, mid-jump or out of hiding: wherever he is put down is home now.
+        // Picked up mid-visit, mid-jump, off a window or out of hiding: wherever he is put
+        // down is home now.
         leap = nil
         isOut = false
+        playingOut = false
+        pouncing = false
+        seat = nil
         clearSelectionPlacement()
         bubbleWindow.alphaValue = 1
         if isWatching { declinedHiding = true }
@@ -337,8 +386,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
                 self.brain.celebrate()
                 self.companion.translated(now: Date())
                 self.saveDay()
-                if self.settings.keepsVocabulary, Vocabulary.isWord(text) {
-                    self.vocabulary.record(text, meaning: self.bubble.text)
+                if self.settings.keepsVocabulary, Vocabulary.isWord(text),
+                   self.vocabulary.record(text, meaning: self.bubble.text) {
+                    self.companion.learnedWord(now: Date())
+                    self.saveDay()
                 }
             } catch {
                 guard let self, self.translationID == id, !Task.isCancelled else { return }
@@ -406,7 +457,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     /// He only volunteers something when he is awake, at home and has the floor.
     private var canSpeakUp: Bool {
         settings.speaksUp && !brain.isAsleep && !bubble.isVisible && translation == nil && remark == nil
-            && !isOut && !isHiding && leap == nil && !isDragging && !frontmostAppIsFullScreen()
+            && !isOut && !isHiding && leap == nil && !isDragging && !brain.isStalking && !frontmostAppIsFullScreen()
     }
 
     private func speakUp(_ occasion: Companion.Occasion) {
@@ -419,11 +470,15 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         let stock = Lines.stock(for: occasion, at: now)
         let config = settings.translatorConfig
         let asksModel = settings.writesOwnLines && !config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // At the end of the day the tally goes under whatever he says.
+        let tally = occasion == .offWork && settings.dailySummary ? companion.day : nil
+        let summary = tally.flatMap(Lines.summary)
+        let brief = Lines.brief(for: occasion, at: now, day: summary == nil ? nil : tally)
 
         remark = Task { [weak self] in
             var line = stock
             if asksModel,
-               let reply = try? await Translator.reply(system: Lines.persona, user: Lines.brief(for: occasion, at: now), config: config),
+               let reply = try? await Translator.reply(system: Lines.persona, user: brief, config: config),
                let written = Lines.tidy(reply) {
                 line = written
             }
@@ -433,7 +488,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             // The moment may have passed while the model was writing.
             guard !self.brain.isAsleep, !self.bubble.isVisible, self.translation == nil else { return }
             self.layoutBubble()
-            self.bubble.say(line, seconds: 9)
+            self.bubble.say(summary.map { "\(line)\n\($0)" } ?? line, seconds: summary == nil ? 9 : 15)
             self.brain.perform(Self.gesture(for: occasion))
         }
     }
@@ -443,7 +498,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         case .hello, .backFromBreak: .hop
         case .welcomeBack: .wiggle
         case .takeBreak: .stretch
-        case .bedtime: .yawn
+        case .bedtime, .lowBattery: .yawn
         case .offWork, .busyDay: .cheer
         case .quiz: .tilt
         }
@@ -529,6 +584,8 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         // The bubble waits for him to land rather than flying along.
         bubbleWindow.alphaValue = 0
         startLeap(to: target, isVisit: true)
+        playingOut = false
+        pouncing = false
     }
 
     private func startLeap(to target: CGPoint, isVisit: Bool) {
@@ -558,8 +615,20 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         } else {
             self.leap = nil
             bubbleWindow.alphaValue = 1
+            if pouncing {
+                pouncing = false
+                brain.landed(caught: brain.hitTest(localMouse))
+            }
         }
         layoutBubble()
+    }
+
+    /// The cursor in the brain's space: relative to his feet, y down, unscaled.
+    private var localMouse: CGPoint {
+        let mouse = NSEvent.mouseLocation
+        let feet = feetOnScreen
+        let scale = settings.petScale
+        return CGPoint(x: (mouse.x - feet.x) / scale, y: (feet.y - mouse.y) / scale)
     }
 
     /// Wherever he is, he heads back to where he belongs once nothing keeps him.
@@ -576,14 +645,16 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             return
         }
         if isOut {
-            // At a selection he stays until he has said his piece, and a moment longer.
-            guard !bubble.isVisible, translation == nil else {
+            // At a selection he stays until he has said his piece, and a moment longer. After a
+            // pounce he hangs about in case the game goes on.
+            guard !bubble.isVisible, translation == nil, !brain.isStalking else {
                 lingering = 0
                 return
             }
             lingering += dt
-            guard lingering > 1 else { return }
+            guard lingering > (playingOut ? 4 : 1) else { return }
         }
+        playingOut = false
         startLeap(to: place, isVisit: false)
     }
 
@@ -591,11 +662,12 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     private var isHiding: Bool { isWatching && !declinedHiding }
 
-    /// Where he sits when he has nothing to do: his spot, or the screen edge during a video.
-    private var restingPlace: CGPoint { isHiding ? hideout : spot }
+    /// Where he sits when he has nothing to do: his spot, the window he has taken a seat on,
+    /// or the screen edge during a video.
+    private var restingPlace: CGPoint { isHiding ? hideout : (seat?.feet ?? spot) }
 
-    private func checkVideo() {
-        if settings.hidesForVideo, Playback.isVideoPlaying() {
+    private func checkVideo(_ videoOn: Bool) {
+        if settings.hidesForVideo, videoOn {
             playingFor += 1
             stoppedFor = 0
         } else {
@@ -629,6 +701,189 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         let goesRight = nearerRight ? (rightIsFree || !leftIsFree) : !(leftIsFree || !rightIsFree)
         let peek = 16 * settings.petScale
         return CGPoint(x: goesRight ? frame.maxX + peek : frame.minX - peek, y: spot.y)
+    }
+
+    // MARK: - Playing
+
+    /// Free to stalk the cursor: awake, not busy, at home or already out playing.
+    private var canPlay: Bool {
+        settings.playsWithCursor && !brain.isAsleep && !bubble.isVisible && translation == nil && remark == nil
+            && (!isOut || playingOut) && !isHiding && leap == nil && !isDragging
+    }
+
+    /// Jumps at the cursor, aiming to land with it between his paws and his nose.
+    private func pounce(at local: CGPoint) {
+        let scale = settings.petScale
+        let feet = feetOnScreen
+        let cursor = CGPoint(x: feet.x + local.x * scale, y: feet.y - local.y * scale)
+        let reach = 300 * scale
+        let landing = onScreen(CGPoint(
+            x: feet.x + (cursor.x - feet.x).clamped(-reach...reach),
+            y: feet.y + (cursor.y - 34 * scale - feet.y).clamped(-120 * scale...160 * scale)
+        ))
+        guard hypot(landing.x - feet.x, landing.y - feet.y) > 12 else {
+            brain.landed(caught: brain.hitTest(localMouse))
+            return
+        }
+        Log.companion.notice("pounce")
+        startLeap(to: landing, isVisit: true)
+        playingOut = true
+        pouncing = true
+    }
+
+    // MARK: - Music and battery
+
+    private func checkMusic(_ videoOn: Bool) {
+        // Films and video calls make sound too; he only dances to things without pictures.
+        let playing = settings.dancesToMusic && !videoOn && AudioActivity.isOutputRunning()
+        if playing {
+            musicFor += 1
+            silenceFor = 0
+        } else {
+            silenceFor += 1
+            musicFor = 0
+        }
+        // A few seconds each way: a notification chime is not a song, and the gap between
+        // tracks is not the end of the album.
+        if !brain.hearsMusic, musicFor >= 4 {
+            brain.hearsMusic = true
+            Log.companion.notice("music on")
+        } else if brain.hearsMusic, silenceFor >= 3 {
+            brain.hearsMusic = false
+            Log.companion.notice("music off")
+        }
+    }
+
+    private func checkBattery() {
+        batteryCheck += 1
+        guard batteryCheck % 2 == 0 else { return }
+        guard settings.reactsToBattery, let reading = Battery.read() else {
+            brain.energy = .full
+            battery = nil
+            return
+        }
+        if let previous = battery, previous.onBattery, !reading.onBattery {
+            Log.companion.notice("plugged in")
+            brain.recharged()
+        }
+        battery = reading
+        brain.energy = !reading.onBattery ? .full : (reading.percent <= 10 ? .empty : (reading.percent <= 20 ? .low : .full))
+        if reading.onBattery, reading.percent <= 10, !warnedAboutBattery {
+            warnedAboutBattery = true
+            companion.batteryLow(percent: reading.percent)
+        } else if !reading.onBattery || reading.percent > 15 {
+            warnedAboutBattery = false
+            companion.batteryRecovered()
+        }
+    }
+
+    // MARK: - Sitting on windows
+
+    private var seatHalfWidth: CGFloat { 62 * settings.petScale }
+
+    /// Nothing better to do: awake, at home, quiet.
+    private var canWander: Bool {
+        !brain.isAsleep && !bubble.isVisible && translation == nil && remark == nil && !isOut && !isHiding
+            && leap == nil && !isDragging && !brain.isStalking
+    }
+
+    /// Once a second: decide whether to go and sit on a window, and whether to get off one.
+    private func checkSeat(_ idle: TimeInterval) {
+        let now = Date()
+        if let seat {
+            guard settings.sitsOnWindows else { return leaveSeat("turned off") }
+            let windows = WindowSeat.onScreenWindows()
+            guard let index = windows.firstIndex(where: { $0.id == seat.windowID }) else { return leaveSeat("window gone") }
+            // Another window has come up over his spot: he would be floating over it.
+            let body = WindowSeat.body(at: seat.feet, halfWidth: seatHalfWidth, height: headHeight)
+            if WindowSeat.isCovered(body, by: windows[..<index].map(\.frame)) {
+                let cover = windows[..<index].first { $0.frame.intersects(body) }.map { String(describing: $0.frame) } ?? "?"
+                return leaveSeat("covered at depth \(index) by \(cover), sitting at \(String(describing: body))")
+            }
+            if now > seat.until, canWander { leaveSeat("had enough") }
+            return
+        }
+        guard settings.sitsOnWindows, now >= nextSeat, canWander, idle < 30 else { return }
+        if !takeSeat() { nextSeat = now.addingTimeInterval(.random(in: 90...180)) }
+    }
+
+    /// Picks a window to sit on, preferring the app in use, and sits on it; `settle` does the jump.
+    /// False when nothing will do: windows that fill the screen leave no room above them.
+    @discardableResult
+    private func takeSeat() -> Bool {
+        let windows = WindowSeat.onScreenWindows()
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        // The app in use first. Asked from his own menu or a link he may be the app in front
+        // himself, and then front-to-back order is all there is to go on.
+        let candidates = windows.indices.filter { windows[$0].pid == front } + windows.indices.filter { windows[$0].pid != front }
+        let screens = NSScreen.screens.map(\.visibleFrame)
+        for index in candidates {
+            let window = windows[index]
+            let fraction = CGFloat.random(in: 0.58...0.85)
+            guard let feet = WindowSeat.seat(on: window.frame, fraction: fraction, halfWidth: seatHalfWidth,
+                                             height: headHeight, screens: screens),
+                  !WindowSeat.isCovered(WindowSeat.body(at: feet, halfWidth: seatHalfWidth, height: headHeight),
+                                        by: windows[..<index].map(\.frame))
+            else { continue }
+            seat = Seat(windowID: window.id, fraction: fraction, until: Date().addingTimeInterval(.random(in: 3 * 60...7 * 60)),
+                        frame: window.frame, feet: feet)
+            Log.companion.notice("sitting on a window \(window.pid == front ? "of the app in front" : "further back", privacy: .public)")
+            return true
+        }
+        Log.companion.notice("no seat among \(windows.count) windows: too narrow, no room above, or covered")
+        return false
+    }
+
+    private func leaveSeat(_ reason: String) {
+        guard seat != nil else { return }
+        seat = nil
+        brain.ride = 0
+        nextSeat = Date().addingTimeInterval(.random(in: 15 * 60...35 * 60))
+        Log.companion.notice("left the window: \(reason, privacy: .public)")
+    }
+
+    /// Every frame while he has a seat: ride along as the window moves, and notice it going.
+    private func followSeat(_ dt: Double) {
+        guard var seat else { return }
+        guard let frame = WindowSeat.frame(of: seat.windowID) else { return leaveSeat("window gone") }
+        guard let feet = WindowSeat.seat(on: frame, fraction: seat.fraction, halfWidth: seatHalfWidth,
+                                         height: headHeight, screens: NSScreen.screens.map(\.visibleFrame))
+        else { return leaveSeat("no room") }
+        let moved = frame.minX - seat.frame.minX
+        seat.frame = frame
+        seat.feet = feet
+        self.seat = seat
+
+        let here = feetOnScreen
+        let sitting = !isOut && !isHiding && !isDragging && leap == nil
+            && hypot(feet.x - here.x, feet.y - here.y) < 80 * settings.petScale
+        let speed = dt > 0 ? moved / dt / settings.petScale : 0
+        brain.ride += ((sitting ? speed : 0) - brain.ride) * min(1, dt * 10)
+        // Still jumping up: aim for where the window is now.
+        if leap != nil, !isOut, !isHiding { leap?.to = feet }
+        guard sitting else { return }
+        petWindow.setFrameOrigin(origin(forFeet: feet, scale: settings.petScale))
+        if bubble.isVisible { layoutBubble() }
+    }
+
+    // MARK: - Looks
+
+    private func applyLook() {
+        let look = PetLook(coat: settings.coat, outfit: settings.outfit.outfit(on: Date()))
+        guard look != petView.look else { return }
+        petView.look = look
+        layoutBubble()
+    }
+
+    /// Festival outfits come and go with the date; once a minute is plenty to notice.
+    private func checkLook() {
+        lookCheck += 1
+        if lookCheck % 60 == 0 { applyLook() }
+    }
+
+    /// From his feet to the top of his ears, or of his hat, on screen.
+    private var headHeight: CGFloat {
+        (PetRenderer.headTop + petView.look.outfit.extraHeight) * settings.petScale
     }
 
     // MARK: - Placement
@@ -693,7 +948,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         let screens = ([sourceScreen].compactMap { $0 } + allScreens.filter { $0 != sourceScreen }).map(\.visibleFrame)
         return SelectionPlacement.place(avoiding: selection, near: anchor, screens: screens,
                                         preferredSize: BubbleLayout.windowSize,
-                                        petHead: settings.visitsSelection ? PetRenderer.headTop * settings.petScale : 0,
+                                        petHead: settings.visitsSelection ? headHeight : 0,
                                         petHalfWidth: settings.visitsSelection ? 64 * settings.petScale : 0)
     }
 
@@ -733,11 +988,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         bubbleWindow.setContentSize(BubbleLayout.windowSize)
         bubbleWindow.alphaValue = leap == nil ? 1 : 0
         let feet = feetOnScreen
-        let scale = settings.petScale
         let size = BubbleLayout.windowSize
         let margin = BubbleLayout.margin
         let area = (petWindow.screen ?? NSScreen.main)?.visibleFrame ?? .zero
-        let headTop = feet.y + PetRenderer.headTop * scale
+        let headTop = feet.y + headHeight
         let roomAbove = headTop + size.height - margin <= area.maxY
         let roomBelow = feet.y - 8 + margin - size.height >= area.minY - margin
         // At home the bubble sits on his head. Out visiting it hangs below him, clear of the
@@ -762,6 +1016,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         }
         add(brain.isAsleep ? "叫醒他" : "哄他睡觉", #selector(toggleSleep))
         add("翻译剪贴板里的文字", #selector(translateClipboard))
+        add("今日小结", #selector(showSummary))
+        if settings.sitsOnWindows {
+            add(seat == nil ? "去窗口上坐坐" : "从窗口上下来", #selector(toggleSeat))
+        }
         let due = vocabulary.words.filter { !$0.isLearned && $0.due <= Date() }.count
         add(due > 0 ? "生词本（\(due) 个待复习）…" : "生词本…", #selector(openVocabulary))
         menu.addItem(.separator())
@@ -781,6 +1039,23 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     @objc private func toggleSleep() {
         setAsleep(!brain.isAsleep)
+    }
+
+    @objc private func showSummary() {
+        setAsleep(false)
+        layoutBubble()
+        bubble.say(Lines.summary(companion.day) ?? "今天还没开张呢，选段文字让我干点活吧", seconds: 8)
+        brain.perform(.tilt)
+    }
+
+    @objc private func toggleSeat() {
+        if seat != nil { return leaveSeat("asked") }
+        setAsleep(false)
+        if !takeSeat() {
+            layoutBubble()
+            bubble.say("没有能坐的窗口：窗口占满屏幕时上面没地方，也不能被别的窗口挡着", seconds: 6)
+            brain.confuse()
+        }
     }
 
     @objc private func translateClipboard() {
@@ -820,10 +1095,16 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     /// Handles `yimiao://translate?text=…`, so other tools can hand him text. Optional `x` and
     /// `y` say where on screen the text is (points from the bottom-left), and he goes there.
+    /// `yimiao://sit` sends him to sit on the front window, like the menu item.
     func open(_ url: URL) {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value: (String) -> String? = { name in items.first { $0.name == name }?.value }
-        guard url.scheme == "yimiao", url.host == "translate", let text = value("text") else { return }
+        guard url.scheme == "yimiao" else { return }
+        if url.host == "sit" {
+            if seat == nil { toggleSeat() }
+            return
+        }
+        guard url.host == "translate", let text = value("text") else { return }
         var place: CGPoint?
         if let x = value("x").flatMap(Double.init), let y = value("y").flatMap(Double.init) {
             place = CGPoint(x: x, y: y)
@@ -853,6 +1134,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     @objc private func resetPosition() {
         leap = nil
         isOut = false
+        seat = nil
         clearSelectionPlacement()
         bubbleWindow.alphaValue = 1
         spot = defaultSpot()

@@ -144,6 +144,24 @@ enum Snapshot {
                 pose.eyeOpen = 0
                 return pose
             },
+            // Crouched mid-stalk, just before the pounce.
+            { brain in
+                brain.mayPlay = true
+                var pose = PetPose()
+                var last = CGPoint(x: 140, y: -60)
+                for i in 0..<240 {
+                    let point = CGPoint(x: 140 + sin(Double(i) / 60 * 2 * .pi * 2.2) * 60, y: -60)
+                    brain.updateMouse(point, travel: abs(point.x - last.x), dt: 1.0 / 60)
+                    last = point
+                    pose = brain.tick(dt: 1.0 / 60)
+                    if brain.isStalking, i > 200 { break }
+                }
+                return pose
+            },
+            { $0.hearsMusic = true; return run($0, 2.75) },
+            { $0.energy = .empty; return run($0, 2) },
+            { $0.recharged(); return run($0, 0.3) },
+            { $0.ride = 900; return run($0, 0.6) },
         ]
 
         let columns = 5
@@ -165,6 +183,32 @@ enum Snapshot {
             ))
             ctx.fill(CGRect(origin: origin, size: cell))
             draw(scene(PetBrain()), in: ctx, at: origin, scale: 1, density: 2)
+        }
+        write(ctx, to: path)
+    }
+
+    /// Every coat, bare and in each outfit, plus asleep in the nightcap.
+    static func writeLooks(to path: String) {
+        let outfits: [Outfit] = [.none, .santa, .witch, .newYear]
+        let awake = run(PetBrain(), 1.0, cursor: CGPoint(x: 60, y: -150))
+        let asleep: PetPose = {
+            let brain = PetBrain()
+            brain.fallAsleep()
+            return run(brain, 7)
+        }()
+        let columns = outfits.count + 1
+        let rows = Coat.allCases.count
+        let cell = PetRenderer.canvas
+        let ctx = makeContext(width: cell.width * CGFloat(columns), height: cell.height * CGFloat(rows), density: 2)
+        for (row, coat) in Coat.allCases.enumerated() {
+            let shade: CGFloat = row.isMultiple(of: 2) ? 0.93 : 0.36
+            for column in 0..<columns {
+                let origin = CGPoint(x: CGFloat(column) * cell.width, y: CGFloat(rows - 1 - row) * cell.height)
+                ctx.setFillColor(CGColor(gray: shade + (column.isMultiple(of: 2) ? 0 : 0.04), alpha: 1))
+                ctx.fill(CGRect(origin: origin, size: cell))
+                let look = PetLook(coat: coat, outfit: column < outfits.count ? outfits[column] : .none)
+                draw(column < outfits.count ? awake : asleep, in: ctx, at: origin, scale: 1, density: 2, look: look)
+            }
         }
         write(ctx, to: path)
     }
@@ -205,9 +249,9 @@ enum Snapshot {
     }
 
     /// Composites the pet's layers into `ctx`, with the canvas's bottom-left corner at `origin`.
-    private static func draw(_ pose: PetPose, in ctx: CGContext, at origin: CGPoint, scale: CGFloat, density: CGFloat) {
+    private static func draw(_ pose: PetPose, in ctx: CGContext, at origin: CGPoint, scale: CGFloat, density: CGFloat, look: PetLook = PetLook()) {
         let stage = PetStage()
-        stage.configure(scale: scale, density: density)
+        stage.configure(scale: scale, density: density, look: look)
         stage.show(pose)
         ctx.saveGState()
         ctx.translateBy(x: origin.x, y: origin.y)

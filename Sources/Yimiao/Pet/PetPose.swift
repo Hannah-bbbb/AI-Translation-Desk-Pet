@@ -1,8 +1,9 @@
 import CoreGraphics
 
-/// Small things that float off the pet: snores, hearts, a "!" when he spots a selection.
+/// Small things that float off the pet: snores, hearts, a "!" when he spots a selection,
+/// notes when he hears music, sparks of electricity when he is plugged in.
 struct Particle {
-    enum Kind { case zzz, heart, spark, alert, question }
+    enum Kind { case zzz, heart, spark, alert, question, note, bolt }
 
     var kind: Kind
     /// Design points relative to the feet; y grows downward.

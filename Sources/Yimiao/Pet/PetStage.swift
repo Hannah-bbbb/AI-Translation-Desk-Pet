@@ -21,9 +21,13 @@ final class PetStage {
     private let body = Part(PetRenderer.bodyBox)
     private let stripes = Part(PetRenderer.stripesBox)
     private let face = Part(PetRenderer.faceBox)
+    private let hat = Part(PetRenderer.hatBox, anchor: PetRenderer.crown)
     private let particles = Part(PetRenderer.particleBox)
     private var scale: CGFloat = 0
     private var density: CGFloat = 0
+    private var look = PetLook()
+    /// The hat currently drawn into `hat`, if any.
+    private var shownHat: Outfit.Hat?
 
     init() {
         layer.anchorPoint = .zero
@@ -31,7 +35,7 @@ final class PetStage {
         rig.addSublayer(shadow.layer)
         rig.addSublayer(figure)
         rig.addSublayer(particles.layer)
-        for part in [tail, earL, earR, body, stripes, face] {
+        for part in [tail, earL, earR, body, stripes, face, hat] {
             figure.addSublayer(part.layer)
         }
         shadow.layer.position = PetRenderer.feet
@@ -40,10 +44,11 @@ final class PetStage {
     }
 
     /// `scale` is the user's size setting, `density` the display's pixels per point.
-    func configure(scale: CGFloat, density: CGFloat) {
-        guard scale != self.scale || density != self.density else { return }
+    func configure(scale: CGFloat, density: CGFloat, look: PetLook = PetLook()) {
+        guard scale != self.scale || density != self.density || look != self.look else { return }
         self.scale = scale
         self.density = density
+        self.look = look
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -51,14 +56,18 @@ final class PetStage {
         rig.position = CGPoint(x: 0, y: layer.bounds.height)
         rig.setAffineTransform(CGAffineTransform(scaleX: scale, y: -scale))
 
-        for part in [shadow, tail, earL, earR, body, stripes, face, particles] {
+        for part in [shadow, tail, earL, earR, body, stripes, face, hat, particles] {
             part.pixelsPerPoint = scale * density
+            // Anything keyed on the pose has to be redrawn in the new colours too.
+            part.forget()
         }
         shadow.redraw(PetRenderer.drawShadow)
-        body.redraw(PetRenderer.drawBody)
-        stripes.redraw(PetRenderer.drawStripes)
-        earR.redraw(PetRenderer.drawEar)
-        earL.layer.contents = earR.layer.contents
+        body.redraw { PetRenderer.drawBody(look, in: $0) }
+        stripes.redraw { PetRenderer.drawStripes(look.coat, in: $0) }
+        earR.redraw { PetRenderer.drawEar(look.coat, left: false, in: $0) }
+        earL.redraw { PetRenderer.drawEar(look.coat, left: true, in: $0) }
+        shownHat = nil
+        hat.clear()
         CATransaction.commit()
     }
 
@@ -89,23 +98,39 @@ final class PetStage {
         )
         stripes.layer.position = CGPoint(x: turn * 3, y: 0)
         face.layer.position = CGPoint(x: turn * 4, y: pose.face.dy * 3)
+        showHat(pose, turn: turn)
 
         // Keys are the pose rounded to steps too small to see, so a still pose costs nothing.
-        tail.redraw(ifChanged: [step(pose.tail, 250)]) {
-            PetRenderer.drawTail(angle: pose.tail, in: $0)
+        tail.redraw(ifChanged: [step(pose.tail, 250)]) { [look] in
+            PetRenderer.drawTail(angle: pose.tail, coat: look.coat, in: $0)
         }
         face.redraw(ifChanged: [
             step(pose.lookL.dx, 60), step(pose.lookL.dy, 60), step(pose.lookR.dx, 60), step(pose.lookR.dy, 60),
             step(pose.eyeOpen, 100), step(pose.pupil, 60), pose.joy > 0.5 ? 1 : 0, step(pose.mouth, 60),
             step(pose.blush, 25), step(pose.sleep, 40), step(pose.noseBubble, 40),
-        ]) {
-            PetRenderer.drawFace(pose, in: $0)
+        ]) { [look] in
+            PetRenderer.drawFace(pose, coat: look.coat, in: $0)
         }
         if pose.particles.isEmpty {
             particles.clear()
         } else {
             particles.redraw { PetRenderer.drawParticles(pose.particles, in: $0) }
         }
+    }
+
+    /// His outfit's hat if it has one. Otherwise a nightcap that fades in as he drifts off.
+    private func showHat(_ pose: PetPose, turn: Double) {
+        let wanted: Outfit.Hat? = look.outfit.hat ?? (pose.sleep > 0.3 ? .nightcap : nil)
+        if wanted != shownHat {
+            shownHat = wanted
+            if let wanted { hat.redraw { PetRenderer.drawHat(wanted, in: $0) } } else { hat.clear() }
+        }
+        guard shownHat != nil else { return }
+        hat.layer.opacity = look.outfit.hat == nil ? Float(ramp(pose.sleep, 0.3, 0.85)) : 1
+        // Rides on the head: slides with the turn and lifts a little when the ears perk up.
+        let perk = -(pose.earL + pose.earR) / 2
+        hat.layer.position = CGPoint(x: PetRenderer.crown.x + turn * 3, y: PetRenderer.crown.y - perk * 6)
+        hat.layer.setAffineTransform(CGAffineTransform(rotationAngle: (pose.earR - pose.earL) * 0.25))
     }
 
     private func step(_ value: Double, _ stepsPerUnit: Double) -> Int32 {
@@ -176,6 +201,11 @@ private final class Part {
     func clear() {
         guard layer.contents != nil else { return }
         layer.contents = nil
+        key = nil
+    }
+
+    /// Drops the remembered pose, so the next keyed redraw happens whatever the key.
+    func forget() {
         key = nil
     }
 }

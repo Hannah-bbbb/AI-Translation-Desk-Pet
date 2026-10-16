@@ -17,6 +17,8 @@ final class SelectionWatcher {
     var allowsClipboardFallback: () -> Bool = { true }
     /// When true, only selections made while holding ⌥ count, or ones followed by a tap of ⌥.
     var requiresOption: () -> Bool = { false }
+    /// Some key went down. Which one is never passed on; the pet only follows the rhythm.
+    var onKeyDown: (() -> Void)?
 
     private var monitors: [Any] = []
     private var pressPoint = CGPoint.zero
@@ -45,8 +47,9 @@ final class SelectionWatcher {
         listen(.keyUp) { [weak self] event in
             self?.keyReleased(event)
         }
-        listen(.keyDown) { [weak self] _ in
+        listen(.keyDown) { [weak self] event in
             self?.optionTap.interrupted()
+            if !event.isARepeat { self?.onKeyDown?() }
         }
         listen(.flagsChanged) { [weak self] event in
             self?.modifiersChanged(event)

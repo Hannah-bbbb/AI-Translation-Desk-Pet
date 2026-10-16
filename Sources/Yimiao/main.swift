@@ -11,6 +11,10 @@ if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 1
     Snapshot.writeSheet(to: arguments[flag + 1])
     exit(0)
 }
+if let flag = arguments.firstIndex(of: "--looks"), arguments.count > flag + 1 {
+    Snapshot.writeLooks(to: arguments[flag + 1])
+    exit(0)
+}
 if let flag = arguments.firstIndex(of: "--iconset"), arguments.count > flag + 1 {
     Snapshot.writeIconSet(to: arguments[flag + 1])
     exit(0)

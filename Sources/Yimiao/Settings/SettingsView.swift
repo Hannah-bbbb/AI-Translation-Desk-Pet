@@ -183,6 +183,11 @@ struct SettingsView: View {
                         .disabled(!settings.remindsBedtime)
                     Toggle("", isOn: $settings.remindsBedtime).labelsHidden().toggleStyle(.switch)
                 }
+                Toggle(isOn: $settings.dailySummary) {
+                    Text("下班时附上今日小结")
+                    Text("翻译了几段、查了几个新词、休息了几次；右键菜单里随时也能看")
+                }
+                .disabled(!settings.remindsOffWork)
                 Toggle(isOn: $settings.writesOwnLines) {
                     Text("台词现编")
                     Text("每次开口让模型按当时的情况写一句，花费极小；关掉就用内置台词")
@@ -206,11 +211,45 @@ struct SettingsView: View {
 
     private var petTab: some View {
         Form {
-            Section {
+            Section("外观") {
                 LabeledContent("大小") {
                     Slider(value: $settings.petScale, in: 0.6...1.8, step: 0.1)
                         .frame(width: 200)
                 }
+                Picker("毛色", selection: $settings.coat) {
+                    ForEach(Coat.allCases) { Text($0.name).tag($0) }
+                }
+                Picker("装扮", selection: $settings.outfit) {
+                    ForEach(OutfitChoice.allCases) { Text($0.name).tag($0) }
+                }
+            }
+
+            Section {
+                Toggle(isOn: $settings.playsWithCursor) {
+                    Text("陪我玩")
+                    Text("在他面前来回晃鼠标，他会压低身子、扭扭屁股，然后扑过来")
+                }
+                Toggle(isOn: $settings.reactsToTyping) {
+                    Text("陪你打字")
+                    Text("你打字时他跟着节奏摇尾巴点头，停下来想事情时他会歪头看你。只看节奏，不记按了什么")
+                }
+                Toggle(isOn: $settings.dancesToMusic) {
+                    Text("听到声音跟着晃")
+                    Text("有声音在放而且不是视频时，他摇头晃脑、冒音符")
+                }
+                Toggle(isOn: $settings.reactsToBattery) {
+                    Text("电量反应")
+                    Text("没插电且电量低于 20% 时他没精神；插上电立刻来劲；低于 10% 会提醒你充电")
+                }
+                Toggle(isOn: $settings.sitsOnWindows) {
+                    Text("偶尔跳到窗口顶上坐着")
+                    Text("隔一阵子跳到你正在用的窗口顶上坐几分钟，窗口拖动时跟着走；被挡住、窗口关掉就回原位")
+                }
+            } header: {
+                Text("像只猫")
+            }
+
+            Section("行为") {
                 Toggle(isOn: $settings.visitsSelection) {
                     Text("跳到选中的文字旁边")
                     Text("用鼠标选中文字时，他蹦过去把译文递到你眼前，说完再回原位")
