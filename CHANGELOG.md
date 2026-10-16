@@ -2,6 +2,12 @@
 
 本文件记录可感知的功能变更、修复及兼容性影响；具体代码以 Git 提交为准。
 
+## 2026-10-16 · 开源
+
+- 以 MIT 许可证开源，托管在 GitHub 的 Hannah-bbbb/AI-Translation-Desk-Pet。
+- README 增加英文简介、效果图（由应用自己的绘制代码离屏渲染）、隐私说明和从源码构建的步骤。
+- 新增 CONTRIBUTING.md：开发环境、离屏预览、调试方法、提交规范、fork 后改名；原 README 中的「本地版本管理与变更规范」移到这里。
+
 ## 2026-10-16 · 应用标识符改为 io.github.hannah-bbbb.yimiao
 
 ### 变化

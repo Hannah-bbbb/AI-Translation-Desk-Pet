@@ -1,12 +1,22 @@
-# 译喵
+# 译喵 Yimiao
 
-住在 macOS 桌面上的橘猫翻译官。醒着的时候眼睛跟着鼠标转，你在任何 App 里选中一段文字，他就蹦到旁边，调用 DeepSeek 或 Kimi 翻译，把译文用气泡递到你眼前。他还会记下你查过的词过几天来考你，在你坐太久、该下班、该睡觉的时候提醒一声。平时他就是只猫：扑你晃的鼠标，跟着你打字的节奏摇尾巴，听到歌摇头晃脑，偶尔跳到你的窗口顶上坐一会儿。
+住在 macOS 桌面上的翻译猫。在任何 App 里选中文字，他就跳到旁边，调用 DeepSeek 或 Kimi 翻译，把译文用气泡递到你眼前。平时他就是只猫：眼睛跟着鼠标转，扑你晃的鼠标，跟着你打字的节奏摇尾巴，听到歌摇头晃脑，偶尔跳到窗口顶上坐一会儿。他还会记下你查过的词过几天来考你，在你坐太久、该下班、该睡觉的时候提醒一声。
+
+*A cat that lives on your Mac desktop and translates whatever text you select, using DeepSeek or Kimi. Native Swift with no dependencies. The app and its documentation are in Chinese.*
+
+![五只不同毛色的译喵：盯着鼠标、翻译完得意、准备扑鼠标、听歌摇头、戴着睡帽睡觉](docs/images/hero.png)
+
+- 原生 Swift（AppKit + Core Animation），没有第三方依赖，常驻约 20 MB 内存，空闲时占一个核的 2–5%
+- 需要 macOS 14 及以上，以及你自己的 DeepSeek 或 Kimi API Key
+- 以 [MIT 许可证](LICENSE) 开源
 
 ## 构建和运行
 
-需要 macOS 14 以上和 Xcode（或 Command Line Tools）。
+目前没有预编译版本，需要自己构建：装好 Xcode 或 Command Line Tools，然后
 
 ```bash
+git clone https://github.com/Hannah-bbbb/AI-Translation-Desk-Pet.git
+cd AI-Translation-Desk-Pet
 Scripts/build.sh --run
 ```
 
@@ -53,6 +63,8 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 
 这些都在「设置 → 桌宠」里，每项可以单独关：
 
+![六种毛色，每行依次是不戴装扮、圣诞帽、巫师帽、春节红项圈，以及睡着时的睡帽](docs/images/looks.png)
+
 - **毛色和装扮**：橘猫、黑猫、白猫、三花、奶牛猫、蓝猫。装扮默认按节日自动换：10 月 24 日到 11 月 1 日戴巫师帽，12 月 18 日到 26 日戴圣诞帽，农历腊月二十三到正月十五换红项圈和中国结；也可以固定一种或不戴。他睡着时会戴上睡帽。
 - **陪我玩**：鼠标在他面前快速左右来回晃几下才会触发，按住鼠标拖选时不算，所以正常工作时不会被误触。扑完他会在那儿多待几秒，你可以接着逗；不玩了他自己回去。
 - **陪你打字**：你打字时他的尾巴跟着拍、头一点一点；连续飞快地打一阵他会两眼放光；打了一段停下来想事情，他偶尔歪头看你。他只知道「有键按下」，不知道按的是哪个键，密码框里的输入系统也不会告诉他。
@@ -95,6 +107,8 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 
 选中单词或短语（三个词以内）翻译后会自动收录，在右键菜单的「生词本」里查看和删除。之后隔 1、3、7、16、35 天各考一次：他报出词，你想一想，点「看答案」，再告诉他记得还是忘了。忘了就从 1 天重新来，再查一次同一个词也是。数据存在 `~/Library/Application Support/Yimiao/vocabulary.json`。
 
+![气泡的各种状态：等待、译文、点击复制、生词抽查、出错提示和重试按钮、长译文滚动](docs/images/bubbles.png)
+
 ## 取词是怎么做的
 
 优先用辅助功能接口直接读选区。Chrome、VS Code、微信这类读不到选区的 App 走「兼容模式」：替你按一下 ⌘C，读完立刻把剪贴板还原。兼容模式只在鼠标拖选或双击后触发，可以在设置里关掉。
@@ -127,7 +141,8 @@ Sources/Yimiao/
   Translate/  SelectionWatcher 取词，LanguageRouter 判断方向，Translator 流式请求
   Companion/  Companion 决定什么时候开口，Lines 是台词，Vocabulary 是生词本
   Settings/   偏好、钥匙串、设置窗口
-  Support/    日志；Snapshot 离屏渲染；Playback 判断视频；Surroundings 读声音、电量和别的窗口
+  Support/    日志；Snapshot 离屏渲染；Playback 判断视频；Surroundings 读声音、电量和别的窗口；
+              AppIdentity 是应用标识符，Migration 从旧标识符导入设置
 ```
 
 改了造型或气泡后不用启动 App 就能看效果：
@@ -135,16 +150,21 @@ Sources/Yimiao/
 ```bash
 swift run Yimiao --snapshot poses.png
 swift run Yimiao --looks looks.png
+swift run Yimiao --hero hero.png
 swift run Yimiao --bubbles bubbles.png
 swift run Yimiao --selection-layouts .build/selection-layouts.png
 ```
 
-## 本地版本管理与变更规范
+## 隐私
 
-项目使用本地 Git 仓库，主分支为 `main`，未配置远程仓库。历史见 `git log --oneline`，功能变更与验证记录见 [CHANGELOG.md](CHANGELOG.md)，后续开发入口见 [开发记忆/目录.md](开发记忆/目录.md)。
+- **发出去的**：他醒着时，你选中的文字会发送给你在设置里配置的 AI 服务（默认 DeepSeek），从剪贴板或链接交给他翻译的文字也一样。陪伴台词由模型现编时，只发送场合描述，例如时间和今天翻译了几段，不包含你的任何文字。睡着时他不取词、不发任何请求。
+- **存在本机的**：API Key 在系统钥匙串里，设置在系统偏好设置文件里，生词本在 `~/Library/Application Support/Yimiao/vocabulary.json`。
+- **不碰的**：没有统计、遥测或任何上传。日志只写进本机系统日志，记录来源 App 和字数，不记录文字内容。陪你打字只知道「有键按下」，不知道按了哪个键。坐窗口时只读其他窗口的位置和所属 App，不读标题和内容。兼容模式会临时借用剪贴板，读完立刻还原。
 
-- 每次提交只处理一个明确主题，标题使用 `fix(模块): 描述`、`feat(模块): 描述`、`docs: 描述` 或 `chore: 描述`。
-- 用户可感知的改动须更新 `CHANGELOG.md`，注明日期、行为变化、验证方式及未验证范围。
-- 提交前运行 `swift test` 和 `git diff --check`；交付可运行应用时再运行 `bash Scripts/build.sh`。
-- `.build/`、`build/`、本机环境文件和日志由 `.gitignore` 排除；API Key 继续只保存在系统钥匙串，不提交密钥或个人设置。
-- 用 `git status --short` 检查待提交内容，用 `git show <提交号>` 查看修改；回退已提交修复时优先使用 `git revert <提交号>`，保留历史记录。
+## 参与贡献
+
+开发环境、调试方法、提交规范和 fork 后改名的步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)，变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 Hannah-bbbb
