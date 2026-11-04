@@ -54,6 +54,7 @@ final class PetView: NSView {
         super.viewDidMoveToWindow()
         link?.invalidate()
         link = nil
+        lastTimestamp = 0
         guard window != nil else { return }
         let link = displayLink(target: self, selector: #selector(step))
         // Common modes keep him animating while a menu is open or he is being dragged.

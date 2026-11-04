@@ -139,7 +139,11 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         Log.selection.notice("launched, Accessibility access: \(self.hasAccessibility)")
 
         settings.$petScale.dropFirst().removeDuplicates()
-            .sink { [weak self] in self?.applyScale($0) }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.applyScale(self.settings.petScale)
+            }
             .store(in: &subscriptions)
         // `@Published` fires before the property changes, so read the new values on the next turn.
         settings.$coat.combineLatest(settings.$outfit).dropFirst()
@@ -148,12 +152,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             .store(in: &subscriptions)
         applyLook()
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                // `settle` walks him over if his spot had to move.
-                self.spot = self.onScreen(self.spot)
-                self.layoutBubble()
-            }
+            .sink { [weak self] _ in self?.screensChanged() }
             .store(in: &subscriptions)
 
         greet()
@@ -574,9 +573,8 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         guard settings.visitsSelection, !isDragging else { return }
         guard let placement = selectionPlacement else { return }
         let target = placement.feet
-        let feet = feetOnScreen
         // Even a short correction matters when the old spot would cover the selected text.
-        guard hypot(target.x - feet.x, target.y - feet.y) > 1 else {
+        guard !PetGeometry.hasArrived(frame: petWindow.frame, at: target, scale: petView.scale) else {
             isOut = true
             layoutBubble()
             return
@@ -638,8 +636,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             return
         }
         let place = restingPlace
-        let feet = feetOnScreen
-        guard hypot(place.x - feet.x, place.y - feet.y) > 1 else {
+        guard !PetGeometry.hasArrived(frame: petWindow.frame, at: place, scale: petView.scale) else {
             isOut = false
             lingering = 0
             return
@@ -889,19 +886,17 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     // MARK: - Placement
 
     private static func windowSize(scale: Double) -> CGSize {
-        CGSize(width: PetRenderer.canvas.width * scale, height: PetRenderer.canvas.height * scale)
+        PetGeometry.windowSize(scale: scale)
     }
 
     /// Where his feet touch down, in screen coordinates (y up).
     private var feetOnScreen: CGPoint {
-        let frame = petWindow.frame
-        let scale = settings.petScale
-        return CGPoint(x: frame.minX + PetRenderer.feet.x * scale, y: frame.maxY - PetRenderer.feet.y * scale)
+        // The view still has the old scale while a settings change is being applied.
+        PetGeometry.feet(in: petWindow.frame, scale: petView.scale)
     }
 
     private func origin(forFeet feet: CGPoint, scale: Double) -> CGPoint {
-        let size = Self.windowSize(scale: scale)
-        return CGPoint(x: feet.x - PetRenderer.feet.x * scale, y: feet.y + PetRenderer.feet.y * scale - size.height)
+        PetGeometry.origin(forFeet: feet, scale: scale)
     }
 
     private func savedSpot() -> CGPoint? {
@@ -917,19 +912,31 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     /// The nearest place to `feet` where all of him can be seen and reached, for when a drag
     /// or a display change would leave him stranded.
     private func onScreen(_ feet: CGPoint) -> CGPoint {
-        let screens = NSScreen.screens.map(\.visibleFrame)
-        guard !screens.isEmpty else { return feet }
-        let reach = 50 * settings.petScale
-        let nearest = screens.first { $0.insetBy(dx: -reach, dy: -reach).contains(feet) }
-            ?? screens.min { distance(from: feet, to: $0) < distance(from: feet, to: $1) }!
-        return CGPoint(
-            x: feet.x.clamped(nearest.minX + reach...max(nearest.minX + reach, nearest.maxX - reach)),
-            y: feet.y.clamped(nearest.minY...max(nearest.minY, nearest.maxY - reach * 2))
-        )
+        PetGeometry.onScreen(feet, screens: NSScreen.screens.map(\.visibleFrame),
+                             halfWidth: 64 * settings.petScale, height: headHeight)
     }
 
-    private func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
-        hypot(point.x - point.x.clamped(rect.minX...rect.maxX), point.y - point.y.clamped(rect.minY...rect.maxY))
+    private func screensChanged() {
+        guard !NSScreen.screens.isEmpty else { return }
+        // A leap, window seat or selected-text rectangle belongs to the previous arrangement.
+        // Do not finish a jump onto a disconnected display or keep translating at stale bounds.
+        leap = nil
+        pouncing = false
+        playingOut = false
+        isOut = false
+        lingering = 0
+        leaveSeat("display arrangement changed")
+        if protectedSelection != nil {
+            cancelTranslation()
+            bubble.hide()
+            clearSelectionPlacement()
+        }
+        spot = onScreen(spot)
+        let feet = onScreen(feetOnScreen)
+        petWindow.setFrameOrigin(origin(forFeet: feet, scale: petView.scale))
+        lastOrigin = petWindow.frame.origin
+        lastMouse = NSEvent.mouseLocation
+        layoutBubble()
     }
 
     private func applyScale(_ scale: Double) {
@@ -937,6 +944,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         let feet = feetOnScreen
         petView.scale = scale
         petWindow.setFrame(CGRect(origin: origin(forFeet: feet, scale: scale), size: Self.windowSize(scale: scale)), display: true)
+        spot = onScreen(spot)
         layoutBubble()
     }
 
