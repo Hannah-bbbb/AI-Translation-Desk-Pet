@@ -228,6 +228,10 @@ struct SettingsView: View {
                     Picker("花色", selection: $settings.snakeSkin) {
                         ForEach(SnakeSkin.allCases) { Text($0.name).tag($0) }
                     }
+                case .dragon:
+                    Picker("花色", selection: $settings.dragonSkin) {
+                        ForEach(DragonSkin.allCases) { Text($0.name).tag($0) }
+                    }
                 case .crab:
                     EmptyView()
                 }

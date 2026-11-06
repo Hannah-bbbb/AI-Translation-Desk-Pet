@@ -67,8 +67,9 @@ final class PetStage {
         // Only the snake nods his markings and face along with his head.
         stripes.layer.setAffineTransform(.identity)
         face.layer.setAffineTransform(.identity)
-        // The cat's ears sit behind his body; the snake's head sits in front of his neck.
-        figure.insertSublayer(earR.layer, above: look.species == .snake ? body.layer : earL.layer)
+        // The cat's ears sit behind his body; the snake's and the dragon's heads sit in front of their necks.
+        figure.insertSublayer(earR.layer, above: [.snake, .dragon].contains(look.species) ? body.layer : earL.layer)
+        particles.reshape(anatomy.particleBox)
         particles.layer.position = CGPoint(x: PetRenderer.feet.x + anatomy.particleOffset.dx,
                                            y: PetRenderer.feet.y + anatomy.particleOffset.dy)
         for part in [shadow, tail, earL, earR, body, stripes, face, hat, particles] {
@@ -88,6 +89,13 @@ final class PetStage {
             body.redraw { SnakeRenderer.drawBody(look, in: $0) }
             stripes.redraw { SnakeRenderer.drawPattern(look.skin, in: $0) }
             earR.redraw { SnakeRenderer.drawHead(look.skin, in: $0) }
+            earL.clear()
+        case .dragon:
+            shadow.redraw(DragonRenderer.drawShadow)
+            body.redraw { DragonRenderer.drawBody(look, in: $0) }
+            earR.redraw { DragonRenderer.drawHead(look.dragonSkin, in: $0) }
+            // The whiskers are drawn into the stripes layer as they sway; see `show`.
+            stripes.clear()
             earL.clear()
         case .crab:
             // All of him is in the face layer; see `showCrab`.
@@ -121,8 +129,13 @@ final class PetStage {
 
         switch look.species {
         case .cat: showCatHead(pose)
-        case .snake: showSnakeHead(pose)
+        case .snake, .dragon: showNoddingHead(pose)
         case .crab: break
+        }
+        if look.species == .dragon {
+            stripes.redraw(ifChanged: [step(pose.tail, 40)]) { [look] in
+                DragonRenderer.drawWhiskers(sway: pose.tail, skin: look.dragonSkin, in: $0)
+            }
         }
 
         // Keys are the pose rounded to steps too small to see, so a still pose costs nothing.
@@ -130,6 +143,7 @@ final class PetStage {
             switch look.species {
             case .cat: PetRenderer.drawTail(angle: pose.tail, coat: look.coat, in: $0)
             case .snake: SnakeRenderer.drawTail(angle: pose.tail, skin: look.skin, in: $0)
+            case .dragon: DragonRenderer.drawTail(angle: pose.tail, skin: look.dragonSkin, in: $0)
             case .crab: break
             }
         }
@@ -144,6 +158,7 @@ final class PetStage {
             switch look.species {
             case .cat: PetRenderer.drawFace(pose, coat: look.coat, in: $0)
             case .snake: SnakeRenderer.drawFace(pose, skin: look.skin, in: $0)
+            case .dragon: DragonRenderer.drawFace(pose, skin: look.dragonSkin, in: $0)
             case .crab: break
             }
         }
@@ -191,9 +206,10 @@ final class PetStage {
         showHat(pose, at: CGPoint(x: seat.x + turn * 3, y: seat.y - perk * 6), angle: (pose.earR - pose.earL) * 0.25)
     }
 
-    /// The snake's head nods on his neck. Ears that would droop lower it (sleepy, tired, being
-    /// carried) and ears that would perk up raise it (spotting something); one ear back tips it.
-    private func showSnakeHead(_ pose: PetPose) {
+    /// The snake's and the dragon's heads nod on their necks. Ears that would droop lower it
+    /// (sleepy, tired, being carried) and ears that would perk up raise it (spotting something);
+    /// one ear back tips it.
+    private func showNoddingHead(_ pose: PetPose) {
         let turn = pose.face.dx
         let droop = (pose.earL + pose.earR) / 2
         let angle = (-0.8 * droop + 0.3 * (pose.earR - pose.earL)).clamped(-0.32...0.32)

@@ -163,12 +163,16 @@ enum Snapshot {
             { $0.recharged(); return run($0, 0.3) },
             { $0.ride = 900; return run($0, 0.6) },
         ]
-        if look.species == .crab {
-            // His own idle moves, caught mid-way.
-            let moves: [(PetBrain.Gesture, Double)] = [
-                (.scuttle, 0.45), (.scuttle, 0.75), (.pinch, 0.5), (.pinch, 0.68), (.wave, 0.6),
-                (.bubbles, 1.3), (.jig, 0.12), (.jig, 0.35), (.duck, 1.0), (.duck, 1.95),
-            ]
+        // The crab's and the dragon's own idle moves, caught mid-way.
+        let moves: [(PetBrain.Gesture, Double)] = switch look.species {
+        case .crab: [
+            (.scuttle, 0.45), (.scuttle, 0.75), (.pinch, 0.5), (.pinch, 0.68), (.wave, 0.6),
+            (.bubbles, 1.3), (.jig, 0.12), (.jig, 0.35), (.duck, 1.0), (.duck, 1.95),
+        ]
+        case .dragon: [(.puff, 0.6), (.puff, 1.2), (.sneeze, 0.5), (.sneeze, 0.95), (.pearl, 0.6), (.pearl, 2.2), (.clouds, 1.0), (.clouds, 1.6)]
+        case .cat, .snake: []
+        }
+        do {
             for (gesture, seconds) in moves {
                 scenes.append { brain in
                     _ = run(brain, 0.2)
@@ -231,6 +235,13 @@ enum Snapshot {
             (PetLook(species: .snake, skin: .sky), { $0.hearsMusic = true; return run($0, 2.75) }),
             (PetLook(species: .snake, skin: .corn), { $0.fallAsleep(); return run($0, 7.3) }),
         ]
+        case .dragon: [
+            (PetLook(species: .dragon, dragonSkin: .red), { run($0, 1.0, cursor: CGPoint(x: -200, y: -200)) }),
+            (PetLook(species: .dragon, dragonSkin: .gold), { $0.celebrate(); return run($0, 0.3) }),
+            (PetLook(species: .dragon, dragonSkin: .azure), { $0.perform(.pearl); return run($0, 1.2) }),
+            (PetLook(species: .dragon, dragonSkin: .white), { $0.perform(.puff); return run($0, 0.9) }),
+            (PetLook(species: .dragon, dragonSkin: .ink), { $0.fallAsleep(); return run($0, 7.3) }),
+        ]
         case .crab: [
             (PetLook(species: .crab), { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) }),
             (PetLook(species: .crab), { $0.celebrate(); return run($0, 0.3) }),
@@ -240,8 +251,12 @@ enum Snapshot {
         ]
         }
         let cell = PetRenderer.canvas
-        // The snake and the crab are low; leave out the empty sky above them.
-        let height = species == .cat ? cell.height : 130
+        // The snake and the crab are low; leave out the empty sky above them. The dragon's antlers need more.
+        let height: CGFloat = switch species {
+        case .cat: cell.height
+        case .dragon: 175
+        case .snake, .crab: 130
+        }
         let ctx = makeContext(width: cell.width * CGFloat(cells.count), height: height, density: 2)
         ctx.setFillColor(CGColor(srgbRed: 0.93, green: 0.95, blue: 0.97, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: cell.width * CGFloat(cells.count), height: height))
@@ -265,6 +280,7 @@ enum Snapshot {
         case .cat: Coat.allCases.map { PetLook(coat: $0) }
         case .snake: SnakeSkin.allCases.map { PetLook(species: .snake, skin: $0) }
         case .crab: [PetLook(species: .crab)]
+        case .dragon: DragonSkin.allCases.map { PetLook(species: .dragon, dragonSkin: $0) }
         }
         let columns = outfits.count + 1
         let rows = looks.count

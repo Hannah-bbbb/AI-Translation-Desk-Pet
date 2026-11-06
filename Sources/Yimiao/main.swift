@@ -1,8 +1,8 @@
 import AppKit
 
 let arguments = CommandLine.arguments
-/// `--snake` or `--crab` after `--snapshot`, `--looks` or `--hero` renders that animal instead of the cat.
-let renderSpecies: Species = arguments.contains("--snake") ? .snake : arguments.contains("--crab") ? .crab : .cat
+/// `--snake`, `--crab` or `--dragon` after `--snapshot`, `--looks` or `--hero` renders that animal instead of the cat.
+let renderSpecies: Species = Species.allCases.first { arguments.contains("--\($0.rawValue)") } ?? .cat
 
 // Developer switches: render the artwork offscreen instead of launching the pet.
 if let flag = arguments.firstIndex(of: "--selection-layouts"), arguments.count > flag + 1 {

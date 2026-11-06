@@ -11,6 +11,8 @@ final class PetBrain {
         case hop, wiggle, stretch, yawn, tilt, cheer
         /// The crab's own moves; on the cat and the snake they are mostly invisible.
         case scuttle, pinch, wave, bubbles, jig, duck
+        /// The dragon's own moves.
+        case puff, sneeze, pearl, clouds
     }
     /// How much battery the Mac has left, as he feels it.
     enum Energy { case full, low, empty }
@@ -256,6 +258,10 @@ final class PetBrain {
         case .bubbles: script = .bubbles()
         case .jig: script = .jig()
         case .duck: script = .duck()
+        case .puff: script = .puff()
+        case .sneeze: script = .sneeze()
+        case .pearl: script = .pearl()
+        case .clouds: script = .clouds()
         }
     }
 
@@ -607,6 +613,15 @@ final class PetBrain {
                 (1.5, { .bubbles() }),
                 (1.5 * lively, { .jig() }),
                 (1, { .duck() }),
+            ]
+        }
+        if anatomy.species == .dragon {
+            options += [
+                (2.5, { .puff() }),
+                (1.5 * lively, { .sneeze() }),
+                (2, { .pearl() }),
+                (1.5 * lively, { .clouds() }),
+                (1.5, { .tailFlick(strength: 0.42) }),
             ]
         }
         let total = options.reduce(0) { $0 + $1.weight }
@@ -967,6 +982,65 @@ private struct Script {
         )
     }
 
+    // MARK: Dragon
+
+    /// Eyes half shut, content, puffing smoke out of his nostrils twice.
+    static func puff() -> Script {
+        Script(
+            duration: 1.9,
+            shape: { time, t in
+                let on = bump(time, 0, 0.2, 1.5, 1.8)
+                t[.eyeOpen] = 1 - 0.5 * on
+                t[.earL] -= 0.08 * on
+                t[.earR] -= 0.08 * on
+            },
+            cues: [(0.35, { $0.puffSmoke() }), (0.95, { $0.puffSmoke() })]
+        )
+    }
+
+    /// The nose twitches, the head goes up, and achoo: a little burst of fire.
+    static func sneeze() -> Script {
+        Script(
+            duration: 1.7,
+            shape: { time, t in
+                let windUp = ramp(time, 0, 0.6) * (1 - ramp(time, 0.65, 0.75))
+                t[.earL] -= 0.28 * windUp
+                t[.earR] -= 0.28 * windUp
+                t[.mouth] = 0.25 * windUp + bump(time, 0.62, 0.68, 0.85, 1.05)
+                if time > 0.35, time < 1.0 { t[.eyeOpen] = 0 }
+            },
+            cues: [(0.68, { $0.kick(.earL, 5); $0.kick(.earR, 5); $0.kick(.squash, 2); $0.breatheFire() })]
+        )
+    }
+
+    /// His flaming pearl floats up beside him and drifts over his head; he watches it go.
+    static func pearl() -> Script {
+        Script(
+            duration: 2.9,
+            shape: { time, t in
+                let follow = (time / 2.5).clamped(0...1)
+                t.setLook(-0.8 + 1.6 * follow, -0.75)
+                t[.faceX] = (-0.8 + 1.6 * follow) * 0.5
+                t[.earL] -= 0.1
+                t[.earR] -= 0.1
+                if time > 2.0 { t[.joy] = 1 }
+            },
+            cues: [(0.05, { $0.throwPearl() })]
+        )
+    }
+
+    /// Auspicious clouds gather round his feet; he bounces on them, pleased.
+    static func clouds() -> Script {
+        Script(
+            duration: 2.8,
+            shape: { time, t in
+                if time > 0.5, time < 2.4 { t[.joy] = 1 }
+                t[.tail] = sin(time * 6) * 0.22
+            },
+            cues: [(0.05, { $0.summonCloud(from: -1) }), (0.35, { $0.summonCloud(from: 1) }), (1.0, { $0.launch(150) })]
+        )
+    }
+
     /// A last yawn, eyelids sinking, then out.
     static func dozeOff() -> Script {
         Script(
@@ -998,6 +1072,35 @@ fileprivate extension PetBrain {
     func launch(_ velocity: Double) {
         liftVelocity = velocity
         lift = 0.01
+    }
+
+    /// Smoke from both nostrils, which sit a little below his eyes.
+    func puffSmoke() {
+        let o = anatomy.particleOffset
+        for side in [-1.0, 1.0] {
+            spawn(.smoke, x: anatomy.eyes.x + side * 6 - o.dx, y: anatomy.eyes.y + 13 - o.dy,
+                  vx: side * 34 - 4, vy: -9, life: 1.4, size: 3.6)
+        }
+    }
+
+    /// Flames out of his mouth, forward and a little down.
+    func breatheFire() {
+        let o = anatomy.particleOffset
+        for i in 0..<6 {
+            spawn(.flame, x: anatomy.eyes.x - 6 - o.dx, y: anatomy.eyes.y + 22 - o.dy,
+                  vx: -46 - Double(i) * 8, vy: Double(i - 3) * 6 + Double.random(in: -5...5), life: 0.55 + Double(i) * 0.05, size: 5.5)
+        }
+    }
+
+    func throwPearl() {
+        let o = anatomy.particleOffset
+        spawn(.pearl, x: anatomy.eyes.x - 30 - o.dx, y: anatomy.eyes.y - 26 - o.dy, vx: 34, vy: -8, life: 2.8, size: 7)
+    }
+
+    /// A cloud near the ground on one side, drifting in under him.
+    func summonCloud(from side: Double) {
+        let o = anatomy.particleOffset
+        spawn(.cloud, x: side * 58 + 4 - o.dx, y: -9 - o.dy, vx: -side * 17, vy: 0, life: 2.6, size: 7.5)
     }
 
     /// A bubble from his mouth, which sits a little below his eyes.

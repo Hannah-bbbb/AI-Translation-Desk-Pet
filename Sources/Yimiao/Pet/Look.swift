@@ -8,11 +8,13 @@ struct PetLook: Equatable {
     var species = Species.cat
     /// Only used when he is a snake; the cat's coat is kept for when he turns back.
     var skin = SnakeSkin.mint
+    /// Only used when he is a dragon.
+    var dragonSkin = DragonSkin.red
 }
 
 /// The animal he is drawn as. All are driven by the same brain; only the drawing differs.
 enum Species: String, CaseIterable, Identifiable, Sendable {
-    case cat, snake, crab
+    case cat, snake, crab, dragon
 
     var id: String { rawValue }
 
@@ -21,8 +23,59 @@ enum Species: String, CaseIterable, Identifiable, Sendable {
         case .cat: "小猫"
         case .snake: "小蛇"
         case .crab: "像素小蟹"
+        case .dragon: "小龙"
         }
     }
+}
+
+/// Colours for the dragon: scales, the mane and fins, and the horns.
+enum DragonSkin: String, CaseIterable, Identifiable, Sendable {
+    case red, gold, azure, white, ink
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .red: "赤龙"
+        case .gold: "金龙"
+        case .azure: "青龙"
+        case .white: "白龙"
+        case .ink: "墨龙"
+        }
+    }
+
+    var palette: DragonPalette {
+        switch self {
+        case .red:
+            DragonPalette(top: rgb(0xF4644F), bottom: rgb(0xD93B33), belly: rgb(0xFFE39E), bellyLine: rgb(0xE9BE6A),
+                          mane: rgb(0xFFC93C), horn: rgb(0xFFF1CC), outline: rgb(0x5A1712))
+        case .gold:
+            DragonPalette(top: rgb(0xFFD966), bottom: rgb(0xF2B23C), belly: rgb(0xFFF4D2), bellyLine: rgb(0xEBCB8A),
+                          mane: rgb(0xF0603A), horn: rgb(0xFFF6E0), outline: rgb(0x5A3510))
+        case .azure:
+            DragonPalette(top: rgb(0x5ACDBF), bottom: rgb(0x2E9E9C), belly: rgb(0xF2F0C4), bellyLine: rgb(0xD3D094),
+                          mane: rgb(0xFFCF45), horn: rgb(0xFFF3D1), outline: rgb(0x123E3F))
+        case .white:
+            DragonPalette(top: rgb(0xFFFFFF), bottom: rgb(0xE3EAF4), belly: rgb(0xFFF3DA), bellyLine: rgb(0xEAD3A8),
+                          mane: rgb(0x7DB4FF), horn: rgb(0xFFE9B0), outline: rgb(0x34405E))
+        case .ink:
+            DragonPalette(top: rgb(0x4A4B58), bottom: rgb(0x2E2F39), belly: rgb(0xEACB72), bellyLine: rgb(0xC9A64C),
+                          mane: rgb(0xEACB72), horn: rgb(0xF4E6BF), outline: rgb(0x121217))
+        }
+    }
+}
+
+struct DragonPalette {
+    /// Scales, lighter on top.
+    var top: CGColor
+    var bottom: CGColor
+    /// Belly plates and snout.
+    var belly: CGColor
+    var bellyLine: CGColor
+    /// Mane, brows, whiskers, beard, back fins and tail tuft.
+    var mane: CGColor
+    var horn: CGColor
+    var outline: CGColor
 }
 
 /// Scale colours for the snake.

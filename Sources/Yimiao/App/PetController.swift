@@ -146,7 +146,10 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             }
             .store(in: &subscriptions)
         // `@Published` fires before the property changes, so read the new values on the next turn.
-        Publishers.CombineLatest4(settings.$species, settings.$coat, settings.$snakeSkin, settings.$outfit).dropFirst()
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(settings.$species, settings.$coat, settings.$snakeSkin, settings.$outfit),
+            settings.$dragonSkin
+        ).dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.applyLook() }
             .store(in: &subscriptions)
@@ -867,7 +870,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     private func applyLook() {
         let look = PetLook(coat: settings.coat, outfit: settings.outfit.outfit(on: Date()),
-                           species: settings.species, skin: settings.snakeSkin)
+                           species: settings.species, skin: settings.snakeSkin, dragonSkin: settings.dragonSkin)
         guard look != petView.look else { return }
         let reshaped = look.species != petView.look.species
         petView.look = look

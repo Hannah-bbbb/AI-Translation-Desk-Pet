@@ -68,6 +68,9 @@ final class Settings: ObservableObject {
     @Published var snakeSkin: SnakeSkin {
         didSet { defaults.set(snakeSkin.rawValue, forKey: "snakeSkin") }
     }
+    @Published var dragonSkin: DragonSkin {
+        didSet { defaults.set(dragonSkin.rawValue, forKey: "dragonSkin") }
+    }
     @Published var outfit: OutfitChoice {
         didSet { defaults.set(outfit.rawValue, forKey: "outfit") }
     }
@@ -163,6 +166,7 @@ final class Settings: ObservableObject {
             "species": Species.cat.rawValue,
             "coat": Coat.orange.rawValue,
             "snakeSkin": SnakeSkin.mint.rawValue,
+            "dragonSkin": DragonSkin.red.rawValue,
             "outfit": OutfitChoice.festival.rawValue,
             "playsWithCursor": true,
             "reactsToTyping": true,
@@ -201,6 +205,7 @@ final class Settings: ObservableObject {
         species = Species(rawValue: defaults.string(forKey: "species") ?? "") ?? .cat
         coat = Coat(rawValue: defaults.string(forKey: "coat") ?? "") ?? .orange
         snakeSkin = SnakeSkin(rawValue: defaults.string(forKey: "snakeSkin") ?? "") ?? .mint
+        dragonSkin = DragonSkin(rawValue: defaults.string(forKey: "dragonSkin") ?? "") ?? .red
         outfit = OutfitChoice(rawValue: defaults.string(forKey: "outfit") ?? "") ?? .festival
         playsWithCursor = defaults.bool(forKey: "playsWithCursor")
         reactsToTyping = defaults.bool(forKey: "reactsToTyping")

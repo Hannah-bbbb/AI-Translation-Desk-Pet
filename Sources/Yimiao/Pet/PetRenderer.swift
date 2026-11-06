@@ -54,6 +54,8 @@ enum PetRenderer {
         var hitAreas: [CGRect]
         /// Moves the snores, hearts and sparks so they come off his head.
         var particleOffset: CGVector
+        /// Where particles can be drawn, before `particleOffset`.
+        var particleBox = PetRenderer.particleBox
         var species = Species.cat
         /// How far his own hats rise above his head, for an animal that does not wear the cat's.
         var hatHeights: [Outfit.Hat: CGFloat] = [:]
@@ -79,6 +81,8 @@ enum PetRenderer {
             SnakeRenderer.anatomy
         case .crab:
             CrabRenderer.anatomy
+        case .dragon:
+            DragonRenderer.anatomy
         }
     }
 
@@ -600,6 +604,68 @@ enum PetRenderer {
             bolt.addLine(to: CGPoint(x: 0, y: -0.2 * s))
             bolt.closeSubpath()
             fill(bolt, Ink.bell, ctx)
+
+        case .smoke:
+            // A soft puff, swelling as it drifts.
+            let r = p.size * (0.8 + 1.1 * t)
+            ctx.setFillColor(rgb(0xFFFFFF, 0.95))
+            ctx.setStrokeColor(rgb(0xA9B4C2))
+            ctx.setLineWidth(1.4)
+            for (dx, dy, k) in [(-0.55, 0.15, 0.7), (0.5, 0.2, 0.75), (0, -0.25, 0.9)] {
+                let puff = CGRect(x: dx * r - r * k, y: dy * r - r * k, width: r * k * 2, height: r * k * 2)
+                ctx.addEllipse(in: puff)
+            }
+            ctx.drawPath(using: .fillStroke)
+
+        case .flame:
+            // A flame licking forward, shrinking as it burns out.
+            let s = p.size * (0.8 + 0.6 * min(1, t * 3)) * (1.2 - 0.6 * t)
+            ctx.rotate(by: atan2(p.vy, p.vx) - .pi / 2)
+            let outer = CGMutablePath()
+            outer.move(to: CGPoint(x: 0, y: -s * 1.6))
+            outer.addQuadCurve(to: CGPoint(x: 0, y: s), control: CGPoint(x: s * 1.4, y: s * 0.2))
+            outer.addQuadCurve(to: CGPoint(x: 0, y: -s * 1.6), control: CGPoint(x: -s * 1.4, y: s * 0.2))
+            fill(outer, rgb(0xFF7A2F), width: 1.4, ctx)
+            ctx.setFillColor(rgb(0xFFD447))
+            ctx.fillEllipse(in: CGRect(x: -s * 0.45, y: -s * 0.2, width: s * 0.9, height: s * 1.0))
+
+        case .pearl:
+            // The flaming pearl: a glowing orb with flames turning around it.
+            let r = p.size * pop
+            ctx.rotate(by: t * 5)
+            for i in 0..<4 {
+                ctx.saveGState()
+                ctx.rotate(by: Double(i) * .pi / 2)
+                let lick = CGMutablePath()
+                lick.move(to: CGPoint(x: -r * 0.55, y: -r * 0.7))
+                lick.addQuadCurve(to: CGPoint(x: r * 0.5, y: -r * 1.75), control: CGPoint(x: -r * 0.2, y: -r * 1.6))
+                lick.addQuadCurve(to: CGPoint(x: r * 0.55, y: -r * 0.7), control: CGPoint(x: r * 0.15, y: -r * 1.1))
+                lick.closeSubpath()
+                fill(lick, rgb(0xFF8A3D), width: 1.2, ctx)
+                ctx.restoreGState()
+            }
+            fill(CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2), transform: nil), rgb(0xFFE38A), width: 1.6, ctx)
+            ctx.setFillColor(rgb(0xFFFFFF, 0.9))
+            ctx.fillEllipse(in: CGRect(x: -r * 0.55, y: -r * 0.6, width: r * 0.5, height: r * 0.5))
+
+        case .cloud:
+            // An auspicious cloud: a row of round puffs with a curl.
+            let s = p.size * pop
+            let cloud = CGMutablePath()
+            for (dx, dy, k) in [(-1.1, 0.25, 0.7), (-0.35, -0.2, 0.95), (0.55, -0.05, 0.85), (1.25, 0.3, 0.6)] {
+                cloud.addEllipse(in: CGRect(x: dx * s - s * k, y: dy * s - s * k, width: s * k * 2, height: s * k * 2))
+            }
+            ctx.addPath(cloud)
+            ctx.setStrokeColor(rgb(0x8FB7E6))
+            ctx.setLineWidth(3.2)
+            ctx.strokePath()
+            ctx.addPath(cloud)
+            ctx.setFillColor(rgb(0xFFFFFF))
+            ctx.fillPath()
+            ctx.setStrokeColor(rgb(0x8FB7E6))
+            ctx.setLineWidth(1.4)
+            ctx.addArc(center: CGPoint(x: -0.35 * s, y: -0.1 * s), radius: s * 0.45, startAngle: .pi * 0.9, endAngle: .pi * 2.3, clockwise: false)
+            ctx.strokePath()
 
         case .bubble:
             // A soap bubble wobbling up: pale fill, white rim, a glint.
