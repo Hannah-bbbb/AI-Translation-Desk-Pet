@@ -7,7 +7,11 @@ import Foundation
 /// the running script, being carried), then lets the springs chase the result.
 final class PetBrain {
     enum Activity { case idle, thinking, speaking }
-    enum Gesture { case hop, wiggle, stretch, yawn, tilt, cheer }
+    enum Gesture {
+        case hop, wiggle, stretch, yawn, tilt, cheer
+        /// The crab's own moves; on the cat and the snake they are mostly invisible.
+        case scuttle, pinch, wave, bubbles, jig, duck
+    }
     /// How much battery the Mac has left, as he feels it.
     enum Energy { case full, low, empty }
 
@@ -26,6 +30,8 @@ final class PetBrain {
     var energy = Energy.full
     /// The bubble normally sits above his head; near the top of the screen it flips below.
     var bubbleBelow = false
+    /// Where his eyes are and what counts as touching him, which differ between cat and snake.
+    var anatomy = PetRenderer.anatomy(.cat)
     private(set) var isAsleep = false
     /// True while something is moving fast enough to deserve the display's full refresh rate.
     var isLively: Bool { livelyHold > 0 }
@@ -77,6 +83,10 @@ final class PetBrain {
 
     private var groove = 0.0
     private var noteTimer = 0.5
+
+    private var tongueTimer = 4.0
+    /// Seconds into a tongue flick, while one is under way.
+    private var tongueFlick: Double?
 
     // MARK: - Input
 
@@ -168,9 +178,11 @@ final class PetBrain {
 
     /// Whether a point (same space as `updateMouse`) lands on his body, ears included.
     func hitTest(_ point: CGPoint) -> Bool {
-        let dx = point.x / 64
-        let dy = (point.y + 54 + lift) / 68
-        return dx * dx + dy * dy <= 1
+        anatomy.hitAreas.contains { area in
+            let dx = (point.x - area.midX) / (area.width / 2)
+            let dy = (point.y + lift - area.midY) / (area.height / 2)
+            return dx * dx + dy * dy <= 1
+        }
     }
 
     // MARK: - Reactions
@@ -204,6 +216,7 @@ final class PetBrain {
         kick(.earL, -6)
         kick(.earR, -6)
         kick(.squash, -1.3)
+        tongueFlick = 0
         spawn(.alert, x: 2, y: -136, vx: 0, vy: -12, life: 0.9, size: 8)
     }
 
@@ -237,6 +250,12 @@ final class PetBrain {
         case .yawn: script = .yawn()
         case .tilt: script = .headTilt(direction: 1, hold: 1.2)
         case .cheer: celebrate()
+        case .scuttle: script = .scuttle(direction: 1)
+        case .pinch: script = .pinch()
+        case .wave: script = .wave(left: false)
+        case .bubbles: script = .bubbles()
+        case .jig: script = .jig()
+        case .duck: script = .duck()
         }
     }
 
@@ -350,6 +369,7 @@ final class PetBrain {
         }
 
         snore(dt, asleep: asleep)
+        let tongue = flickTongue(dt)
         advanceParticles(dt)
 
         var pose = PetPose()
@@ -369,6 +389,9 @@ final class PetBrain {
         pose.tail = value(.tail)
         pose.sleep = asleep
         pose.noseBubble = noseBubble
+        pose.tongue = tongue
+        pose.scuttle = value(.scuttle)
+        pose.claw = value(.claw)
         pose.particles = particles
         return pose
     }
@@ -384,14 +407,15 @@ final class PetBrain {
         let wanderY = sin(clock * 0.31) * 0.12
 
         // Each eye aims on its own, so he goes cross-eyed when the cursor sits on his nose.
-        let left = aim(from: CGPoint(x: -21, y: -62 - lift), reach: 60)
-        let right = aim(from: CGPoint(x: 21, y: -62 - lift), reach: 60)
+        let eyes = anatomy.eyes
+        let left = aim(from: CGPoint(x: eyes.x - anatomy.eyeSpread, y: eyes.y - lift), reach: 60)
+        let right = aim(from: CGPoint(x: eyes.x + anatomy.eyeSpread, y: eyes.y - lift), reach: 60)
         t[.lookLX] = left.dx * attention + wanderX * drift
         t[.lookLY] = left.dy * attention + wanderY * drift
         t[.lookRX] = right.dx * attention + wanderX * drift
         t[.lookRY] = right.dy * attention + wanderY * drift
 
-        let head = aim(from: CGPoint(x: 0, y: -60 - lift), reach: 260)
+        let head = aim(from: CGPoint(x: eyes.x, y: eyes.y + 2 - lift), reach: 260)
         t[.faceX] = head.dx * attention + wanderX * 0.5 * drift
         t[.faceY] += head.dy * attention
     }
@@ -574,6 +598,17 @@ final class PetBrain {
             (energy == .full ? 0.7 : 3, { .yawn() }),
         ]
         if attention < 0.3 { options.append((4, { .lookAround() })) }
+        if anatomy.species == .crab {
+            // Crab things, on top of everything the cat does.
+            options += [
+                (2.5 * lively, { .scuttle(direction: Bool.random() ? 1 : -1) }),
+                (2, { .pinch() }),
+                (1.5, { .wave(left: Bool.random()) }),
+                (1.5, { .bubbles() }),
+                (1.5 * lively, { .jig() }),
+                (1, { .duck() }),
+            ]
+        }
         let total = options.reduce(0) { $0 + $1.weight }
         var roll = Double.random(in: 0..<total)
         for option in options {
@@ -598,6 +633,25 @@ final class PetBrain {
             snoreTimer = 1.3
             spawn(.zzz, x: 30, y: -104, vx: 9, vy: -15, life: 2.6, size: 4.5)
         }
+    }
+
+    /// A quick taste of the air now and then, and whenever something catches his eye. Only the
+    /// snake shows it; the cat's renderer ignores it.
+    private func flickTongue(_ dt: Double) -> Double {
+        guard !isAsleep, !isHeld, activity != .speaking, script?.interruptible ?? true else {
+            tongueFlick = nil
+            return 0
+        }
+        tongueTimer -= dt
+        if tongueFlick == nil, tongueTimer <= 0 {
+            tongueFlick = 0
+            tongueTimer = Double.random(in: 3...8)
+        }
+        guard var time = tongueFlick else { return 0 }
+        time += dt
+        tongueFlick = time >= 0.6 ? nil : time
+        // Out fast, a flutter, back in.
+        return bump(time, 0, 0.08, 0.4, 0.6) * (0.82 + 0.18 * sin(time * 55))
     }
 
     private func advanceParticles(_ dt: Double) {
@@ -684,6 +738,7 @@ private enum Channel: Int, CaseIterable {
     case squash, tilt, earL, earR, eyeOpen
     case lookLX, lookLY, lookRX, lookRY, faceX, faceY
     case pupil, joy, mouth, blush, tail, sleep
+    case scuttle, claw
 
     var rest: Double {
         switch self {
@@ -707,6 +762,8 @@ private enum Channel: Int, CaseIterable {
         case .blush: (50, 13)
         case .tail: (90, 8)
         case .sleep: (28, 10.5)
+        case .scuttle: (160, 22)
+        case .claw: (500, 30)
         }
     }
 }
@@ -834,6 +891,82 @@ private struct Script {
         )
     }
 
+    // MARK: Crab
+
+    /// A few steps sideways, claws up and eyes on where he is going, a pause, and back.
+    static func scuttle(direction: Double) -> Script {
+        Script(duration: 2.6, shape: { time, t in
+            let out = ramp(time, 0.1, 0.9) * (1 - ramp(time, 1.5, 2.3))
+            t[.scuttle] = direction * 18 * out
+            let walking = bump(time, 0, 0.1, 2.3, 2.5)
+            t[.earL] -= 0.16 * walking
+            t[.earR] -= 0.16 * walking
+            t.setLook(direction * (time < 1.3 ? 0.7 : -0.7) * walking, 0.1)
+        })
+    }
+
+    /// Claws up, snap snap snap.
+    static func pinch() -> Script {
+        Script(duration: 1.6, shape: { time, t in
+            let up = bump(time, 0, 0.15, 1.3, 1.55)
+            t[.earL] -= 0.32 * up
+            t[.earR] -= 0.32 * up
+            if up > 0.6 { t[.claw] = sin((time - 0.15) * 2 * .pi * 3) > 0 ? 1 : 0 }
+        })
+    }
+
+    /// One claw raised and bobbing: hello.
+    static func wave(left: Bool) -> Script {
+        Script(duration: 1.7, shape: { time, t in
+            let on = bump(time, 0, 0.12, 1.4, 1.6)
+            t[left ? .earL : .earR] -= on * (0.26 + 0.12 * sin(time * 2 * .pi * 2.5))
+            if on > 0.5 { t[.joy] = 1 }
+        })
+    }
+
+    /// Bubbles out of his mouth, one after another, while he watches them go.
+    static func bubbles() -> Script {
+        Script(
+            duration: 2.4,
+            shape: { time, t in
+                let on = bump(time, 0, 0.15, 1.9, 2.2)
+                t[.mouth] = 0.16 * on
+                t.setLook(0.15 * on, -0.75 * ramp(time, 0.5, 1.0) * on)
+            },
+            cues: [(0.35, { $0.blowBubble() }), (0.75, { $0.blowBubble() }), (1.1, { $0.blowBubble() }), (1.6, { $0.blowBubble() })]
+        )
+    }
+
+    /// A happy little dance: knees bending on the beat, claws pumping in turn.
+    static func jig() -> Script {
+        Script(
+            duration: 2.0,
+            shape: { time, t in
+                guard time < 1.7 else { return }
+                let beat = sin(time * 2 * .pi * 2.4)
+                t[.squash] += 0.1 * max(0, beat)
+                t[.tail] = beat * 0.32
+                if time > 0.15 { t[.joy] = 1 }
+            },
+            cues: [(1.7, { $0.launch(190) })]
+        )
+    }
+
+    /// Ducks down with his eyes shut and his claws tucked in, then pops back up, eyes wide.
+    static func duck() -> Script {
+        Script(
+            duration: 2.6,
+            shape: { time, t in
+                let down = bump(time, 0, 0.2, 1.5, 1.7)
+                t[.squash] += 0.28 * down
+                t[.earL] += 0.3 * down
+                t[.earR] += 0.3 * down
+                if down > 0.4 { t[.eyeOpen] = 0 }
+            },
+            cues: [(1.7, { $0.kick(.pupil, 4); $0.launch(170) })]
+        )
+    }
+
     /// A last yawn, eyelids sinking, then out.
     static func dozeOff() -> Script {
         Script(
@@ -865,5 +998,12 @@ fileprivate extension PetBrain {
     func launch(_ velocity: Double) {
         liftVelocity = velocity
         lift = 0.01
+    }
+
+    /// A bubble from his mouth, which sits a little below his eyes.
+    func blowBubble() {
+        let offset = anatomy.particleOffset
+        spawn(.bubble, x: anatomy.eyes.x + Double.random(in: -3...3) - offset.dx, y: anatomy.eyes.y + 12 - offset.dy,
+              vx: Double.random(in: -7...7), vy: -42, life: 1.7, size: Double.random(in: 3...5))
     }
 }

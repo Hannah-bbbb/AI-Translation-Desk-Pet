@@ -59,8 +59,14 @@ final class Settings: ObservableObject {
         didSet { defaults.set(visitsSelection, forKey: "visitsSelection") }
     }
 
+    @Published var species: Species {
+        didSet { defaults.set(species.rawValue, forKey: "species") }
+    }
     @Published var coat: Coat {
         didSet { defaults.set(coat.rawValue, forKey: "coat") }
+    }
+    @Published var snakeSkin: SnakeSkin {
+        didSet { defaults.set(snakeSkin.rawValue, forKey: "snakeSkin") }
     }
     @Published var outfit: OutfitChoice {
         didSet { defaults.set(outfit.rawValue, forKey: "outfit") }
@@ -154,7 +160,9 @@ final class Settings: ObservableObject {
             "autoSleepMinutes": 5,
             "petScale": 1.0,
             "visitsSelection": true,
+            "species": Species.cat.rawValue,
             "coat": Coat.orange.rawValue,
+            "snakeSkin": SnakeSkin.mint.rawValue,
             "outfit": OutfitChoice.festival.rawValue,
             "playsWithCursor": true,
             "reactsToTyping": true,
@@ -190,7 +198,9 @@ final class Settings: ObservableObject {
         autoSleepMinutes = defaults.integer(forKey: "autoSleepMinutes")
         petScale = defaults.double(forKey: "petScale").clamped(0.6...1.8)
         visitsSelection = defaults.bool(forKey: "visitsSelection")
+        species = Species(rawValue: defaults.string(forKey: "species") ?? "") ?? .cat
         coat = Coat(rawValue: defaults.string(forKey: "coat") ?? "") ?? .orange
+        snakeSkin = SnakeSkin(rawValue: defaults.string(forKey: "snakeSkin") ?? "") ?? .mint
         outfit = OutfitChoice(rawValue: defaults.string(forKey: "outfit") ?? "") ?? .festival
         playsWithCursor = defaults.bool(forKey: "playsWithCursor")
         reactsToTyping = defaults.bool(forKey: "reactsToTyping")

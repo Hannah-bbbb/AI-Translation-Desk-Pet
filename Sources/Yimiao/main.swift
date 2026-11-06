@@ -1,6 +1,8 @@
 import AppKit
 
 let arguments = CommandLine.arguments
+/// `--snake` or `--crab` after `--snapshot`, `--looks` or `--hero` renders that animal instead of the cat.
+let renderSpecies: Species = arguments.contains("--snake") ? .snake : arguments.contains("--crab") ? .crab : .cat
 
 // Developer switches: render the artwork offscreen instead of launching the pet.
 if let flag = arguments.firstIndex(of: "--selection-layouts"), arguments.count > flag + 1 {
@@ -8,7 +10,7 @@ if let flag = arguments.firstIndex(of: "--selection-layouts"), arguments.count >
     exit(0)
 }
 if let flag = arguments.firstIndex(of: "--snapshot"), arguments.count > flag + 1 {
-    Snapshot.writeSheet(to: arguments[flag + 1])
+    Snapshot.writeSheet(to: arguments[flag + 1], look: PetLook(species: renderSpecies))
     exit(0)
 }
 // One-time move of preferences and API keys from an earlier bundle identifier.
@@ -17,11 +19,11 @@ if let flag = arguments.firstIndex(of: "--import-from"), arguments.count > flag 
     exit(0)
 }
 if let flag = arguments.firstIndex(of: "--hero"), arguments.count > flag + 1 {
-    Snapshot.writeHero(to: arguments[flag + 1])
+    Snapshot.writeHero(to: arguments[flag + 1], species: renderSpecies)
     exit(0)
 }
 if let flag = arguments.firstIndex(of: "--looks"), arguments.count > flag + 1 {
-    Snapshot.writeLooks(to: arguments[flag + 1])
+    Snapshot.writeLooks(to: arguments[flag + 1], species: renderSpecies)
     exit(0)
 }
 if let flag = arguments.firstIndex(of: "--iconset"), arguments.count > flag + 1 {

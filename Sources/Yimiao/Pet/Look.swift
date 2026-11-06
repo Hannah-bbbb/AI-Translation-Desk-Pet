@@ -1,10 +1,78 @@
 import CoreGraphics
 import Foundation
 
-/// How he looks: his coat and whatever he is wearing.
+/// How he looks: what animal he is, his coat or skin, and whatever he is wearing.
 struct PetLook: Equatable {
     var coat = Coat.orange
     var outfit = Outfit.none
+    var species = Species.cat
+    /// Only used when he is a snake; the cat's coat is kept for when he turns back.
+    var skin = SnakeSkin.mint
+}
+
+/// The animal he is drawn as. All are driven by the same brain; only the drawing differs.
+enum Species: String, CaseIterable, Identifiable, Sendable {
+    case cat, snake, crab
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .cat: "小猫"
+        case .snake: "小蛇"
+        case .crab: "像素小蟹"
+        }
+    }
+}
+
+/// Scale colours for the snake.
+enum SnakeSkin: String, CaseIterable, Identifiable, Sendable {
+    case mint, banana, sakura, sky, corn
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .mint: "薄荷绿"
+        case .banana: "香蕉黄"
+        case .sakura: "樱花粉"
+        case .sky: "晴空蓝"
+        case .corn: "玉米蛇"
+        }
+    }
+
+    var palette: SkinPalette {
+        switch self {
+        case .mint:
+            SkinPalette(top: rgb(0xB4EB8E), bottom: rgb(0x7FCB66), spot: rgb(0x5DAE52),
+                        belly: rgb(0xFFF4C9), bellyLine: rgb(0xE9D79A), outline: rgb(0x2F4A26))
+        case .banana:
+            SkinPalette(top: rgb(0xFFE78F), bottom: rgb(0xFFC954), spot: rgb(0xF39C3B),
+                        belly: rgb(0xFFF8E8), bellyLine: rgb(0xF2DDB0), outline: rgb(0x5A3A1C))
+        case .sakura:
+            SkinPalette(top: rgb(0xFFD0DF), bottom: rgb(0xFFA8C4), spot: rgb(0xF07AA2),
+                        belly: rgb(0xFFF3F6), bellyLine: rgb(0xF6CCD8), outline: rgb(0x6A2C45))
+        case .sky:
+            SkinPalette(top: rgb(0xAEDFFF), bottom: rgb(0x7BBFF2), spot: rgb(0x4F98DB),
+                        belly: rgb(0xF0F8FF), bellyLine: rgb(0xC9E1F5), outline: rgb(0x25405E))
+        case .corn:
+            SkinPalette(top: rgb(0xFFBE95), bottom: rgb(0xFF9469), spot: rgb(0xDB5532),
+                        belly: rgb(0xFFF2E2), bellyLine: rgb(0xF3D3B8), outline: rgb(0x5A2A1A))
+        }
+    }
+}
+
+struct SkinPalette {
+    /// Back of the coils and top of the head, lighter on top.
+    var top: CGColor
+    var bottom: CGColor
+    /// Round markings along the back.
+    var spot: CGColor
+    /// Underside and chin.
+    var belly: CGColor
+    /// The lines between belly scales.
+    var bellyLine: CGColor
+    var outline: CGColor
 }
 
 /// Fur colours. The cat is drawn in code, so a coat is a palette and a few patches.

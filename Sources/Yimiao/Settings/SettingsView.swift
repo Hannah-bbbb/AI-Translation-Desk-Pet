@@ -216,8 +216,20 @@ struct SettingsView: View {
                     Slider(value: $settings.petScale, in: 0.6...1.8, step: 0.1)
                         .frame(width: 200)
                 }
-                Picker("毛色", selection: $settings.coat) {
-                    ForEach(Coat.allCases) { Text($0.name).tag($0) }
+                Picker("形象", selection: $settings.species) {
+                    ForEach(Species.allCases) { Text($0.name).tag($0) }
+                }
+                switch settings.species {
+                case .cat:
+                    Picker("毛色", selection: $settings.coat) {
+                        ForEach(Coat.allCases) { Text($0.name).tag($0) }
+                    }
+                case .snake:
+                    Picker("花色", selection: $settings.snakeSkin) {
+                        ForEach(SnakeSkin.allCases) { Text($0.name).tag($0) }
+                    }
+                case .crab:
+                    EmptyView()
                 }
                 Picker("装扮", selection: $settings.outfit) {
                     ForEach(OutfitChoice.allCases) { Text($0.name).tag($0) }

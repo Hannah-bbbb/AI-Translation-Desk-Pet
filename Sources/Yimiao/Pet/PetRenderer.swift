@@ -24,10 +24,68 @@ enum PetRenderer {
     /// The ears swivel around the middle of their base.
     static let earPivot = CGPoint(x: 34, y: -76)
 
+    /// Where each layer sits for one animal. The canvas and the feet are shared, so the window,
+    /// the jumps and the bubble placement do not care which animal he is.
+    struct Anatomy {
+        var shadowBox: CGRect
+        var tailBox: CGRect
+        var bodyBox: CGRect
+        /// Markings that slide with the head turn: tabby stripes, or the spots on a snake's head.
+        var stripesBox: CGRect
+        var faceBox: CGRect
+        /// The cat's right ear (the left is its mirror image), or the snake's head.
+        var earBox: CGRect
+        /// What that part swings around.
+        var earPivot: CGPoint
+        /// Hats are drawn around the cat's crown; this is where that point lands on this animal.
+        var hatSeat: CGPoint
+        /// Hats are sized for the cat's head; a smaller head wears them smaller.
+        var hatScale: CGFloat
+        /// Height of the top of the head (ears included) above the feet.
+        var headTop: CGFloat
+        /// How far the middle of the head is to the side of the feet. The bubble's tail points there.
+        var headX: CGFloat
+        /// Half his width, for keeping him on screen and finding room for him.
+        var halfWidth: CGFloat
+        /// The point between his eyes and half the distance between them, which the gaze aims from.
+        var eyes: CGPoint
+        var eyeSpread: Double
+        /// Ellipses, given by their bounding boxes, that count as touching him.
+        var hitAreas: [CGRect]
+        /// Moves the snores, hearts and sparks so they come off his head.
+        var particleOffset: CGVector
+        var species = Species.cat
+        /// How far his own hats rise above his head, for an animal that does not wear the cat's.
+        var hatHeights: [Outfit.Hat: CGFloat] = [:]
+
+        /// From the feet to the top of his head, or of his hat if he wears one.
+        func height(wearing outfit: Outfit) -> CGFloat {
+            guard let hat = outfit.hat else { return headTop }
+            if let own = hatHeights[hat] { return headTop + own }
+            // `extraHeight` is measured on the cat: how far the hat rises above his ears.
+            let rise = PetRenderer.headTop + outfit.extraHeight + PetRenderer.crown.y
+            return max(headTop, -hatSeat.y + rise * hatScale)
+        }
+    }
+
+    static func anatomy(_ species: Species) -> Anatomy {
+        switch species {
+        case .cat:
+            Anatomy(shadowBox: shadowBox, tailBox: tailBox, bodyBox: bodyBox, stripesBox: stripesBox, faceBox: faceBox,
+                    earBox: earBox, earPivot: earPivot, hatSeat: crown, hatScale: 1, headTop: headTop, headX: 0,
+                    halfWidth: 64, eyes: CGPoint(x: 0, y: -62), eyeSpread: 21,
+                    hitAreas: [CGRect(x: -64, y: -122, width: 128, height: 136)], particleOffset: .zero)
+        case .snake:
+            SnakeRenderer.anatomy
+        case .crab:
+            CrabRenderer.anatomy
+        }
+    }
+
     // MARK: - Palette
 
     /// Colours that stay the same whatever his coat. Fur colours come from `CoatPalette`.
-    private enum Ink {
+    enum Ink {
         /// Particles keep the original brown rim on every coat.
         static let outline = rgb(0x4B2E1E)
         static let cream = rgb(0xFFF4DF)
@@ -40,7 +98,7 @@ enum PetRenderer {
         static let bell = rgb(0xFFD447)
     }
 
-    private static func rgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
+    static func rgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
         CGColor(
             srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,
@@ -49,7 +107,7 @@ enum PetRenderer {
         )
     }
 
-    private static func gradient(_ top: CGColor, _ bottom: CGColor) -> CGGradient {
+    static func gradient(_ top: CGColor, _ bottom: CGColor) -> CGGradient {
         CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [top, bottom] as CFArray, locations: [0, 1])!
     }
 
@@ -113,16 +171,7 @@ enum PetRenderer {
         if look.outfit == .newYear {
             drawKnot(ctx)
         } else {
-            let bell = CGRect(x: -6.2, y: -27.5, width: 12.4, height: 12.4)
-            ctx.setFillColor(Ink.bell)
-            ctx.fillEllipse(in: bell)
-            ctx.setStrokeColor(coat.outline)
-            ctx.setLineWidth(2.2)
-            ctx.strokeEllipse(in: bell)
-            ctx.setLineWidth(1.6)
-            ctx.move(to: CGPoint(x: 0, y: bell.midY + 1))
-            ctx.addLine(to: CGPoint(x: 0, y: bell.maxY - 2))
-            ctx.strokePath()
+            drawBell(outline: coat.outline, ctx)
         }
 
         for side in [-1.0, 1.0] {
@@ -135,8 +184,22 @@ enum PetRenderer {
         }
     }
 
+    /// The bell on his collar, hanging just below the collar's middle.
+    static func drawBell(outline: CGColor, _ ctx: CGContext) {
+        let bell = CGRect(x: -6.2, y: -27.5, width: 12.4, height: 12.4)
+        ctx.setFillColor(Ink.bell)
+        ctx.fillEllipse(in: bell)
+        ctx.setStrokeColor(outline)
+        ctx.setLineWidth(2.2)
+        ctx.strokeEllipse(in: bell)
+        ctx.setLineWidth(1.6)
+        ctx.move(to: CGPoint(x: 0, y: bell.midY + 1))
+        ctx.addLine(to: CGPoint(x: 0, y: bell.maxY - 2))
+        ctx.strokePath()
+    }
+
     /// A little Chinese knot hanging from the collar in place of the bell, with a tassel.
-    private static func drawKnot(_ ctx: CGContext) {
+    static func drawKnot(_ ctx: CGContext) {
         let knot = CGMutablePath()
         knot.move(to: CGPoint(x: 0, y: -29))
         knot.addLine(to: CGPoint(x: 7.5, y: -21.5))
@@ -277,8 +340,8 @@ enum PetRenderer {
         }
         ctx.strokePath()
 
-        drawEye(at: CGPoint(x: -21, y: -62), look: pose.lookL, pose, palette, ctx)
-        drawEye(at: CGPoint(x: 21, y: -62), look: pose.lookR, pose, palette, ctx)
+        drawEye(at: CGPoint(x: -21, y: -62), look: pose.lookL, pose, outline: palette.outline, line: palette.faceLine, ctx)
+        drawEye(at: CGPoint(x: 21, y: -62), look: pose.lookR, pose, outline: palette.outline, line: palette.faceLine, ctx)
 
         let m = CGPoint(x: 0, y: -44)
         if pose.mouth > 0.06 {
@@ -308,53 +371,59 @@ enum PetRenderer {
         ctx.setFillColor(Ink.nose)
         ctx.fillEllipse(in: CGRect(x: m.x - 3.4, y: m.y - 6.4, width: 6.8, height: 4.8))
 
-        if pose.noseBubble > 0.02 {
-            let r = 2 + 8.5 * pose.noseBubble
-            let centre = CGPoint(x: m.x + 4 + r * 0.75, y: m.y - 4 + r * 0.3)
-            let bubble = CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2)
-            ctx.setFillColor(rgb(0xBFE9FF, 0.55))
-            ctx.fillEllipse(in: bubble)
-            ctx.setStrokeColor(rgb(0xFFFFFF, 0.9))
-            ctx.setLineWidth(1.3)
-            ctx.strokeEllipse(in: bubble)
-            ctx.setFillColor(rgb(0xFFFFFF, 0.9))
-            ctx.fillEllipse(in: CGRect(x: centre.x - r * 0.55, y: centre.y - r * 0.6, width: r * 0.4, height: r * 0.4))
-        }
+        drawNoseBubble(pose.noseBubble, from: CGPoint(x: m.x + 4, y: m.y - 4), ctx)
     }
 
-    private static func drawEye(at c: CGPoint, look: CGVector, _ pose: PetPose, _ palette: CoatPalette, _ ctx: CGContext) {
+    /// The snot bubble he blows while asleep, growing out of `nostril` to the lower right.
+    static func drawNoseBubble(_ size: Double, from nostril: CGPoint, _ ctx: CGContext) {
+        guard size > 0.02 else { return }
+        let r = 2 + 8.5 * size
+        let centre = CGPoint(x: nostril.x + r * 0.75, y: nostril.y + r * 0.3)
+        let bubble = CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2)
+        ctx.setFillColor(rgb(0xBFE9FF, 0.55))
+        ctx.fillEllipse(in: bubble)
+        ctx.setStrokeColor(rgb(0xFFFFFF, 0.9))
+        ctx.setLineWidth(1.3)
+        ctx.strokeEllipse(in: bubble)
+        ctx.setFillColor(rgb(0xFFFFFF, 0.9))
+        ctx.fillEllipse(in: CGRect(x: centre.x - r * 0.55, y: centre.y - r * 0.6, width: r * 0.4, height: r * 0.4))
+    }
+
+    /// One eye centred on `c`. `size` scales it; `line` draws it shut.
+    static func drawEye(at c: CGPoint, look: CGVector, _ pose: PetPose, size: CGFloat = 1,
+                        outline: CGColor, line: CGColor, _ ctx: CGContext) {
         let open = pose.eyeOpen.clamped(0...1) * (1 - pose.sleep.clamped(0...1))
         let happy = pose.joy > 0.5
 
         if happy || open < 0.14 {
             // Shut. Happy eyes arch upward, sleeping eyes sag, a blink is almost flat.
-            let bend: CGFloat = happy ? -11 : 3 + 7 * pose.sleep
-            let y = c.y + (happy ? 4 : 1)
-            ctx.move(to: CGPoint(x: c.x - 10, y: y))
-            ctx.addQuadCurve(to: CGPoint(x: c.x + 10, y: y), control: CGPoint(x: c.x, y: y + bend))
-            ctx.setStrokeColor(palette.faceLine)
+            let bend: CGFloat = (happy ? -11 : 3 + 7 * pose.sleep) * size
+            let y = c.y + (happy ? 4 : 1) * size
+            ctx.move(to: CGPoint(x: c.x - 10 * size, y: y))
+            ctx.addQuadCurve(to: CGPoint(x: c.x + 10 * size, y: y), control: CGPoint(x: c.x, y: y + bend))
+            ctx.setStrokeColor(line)
             ctx.setLineWidth(3.2)
             ctx.strokePath()
             return
         }
 
-        let rx: CGFloat = 12.5
-        let ry = 14 * open
+        let rx: CGFloat = 12.5 * size
+        let ry = 14 * size * open
         let white = CGRect(x: c.x - rx, y: c.y - ry, width: rx * 2, height: ry * 2)
         ctx.saveGState()
         ctx.addEllipse(in: white)
         ctx.clip()
         ctx.setFillColor(rgb(0xFFFFFF))
         ctx.fill(white)
-        let r = 7.4 * pose.pupil
-        let p = CGPoint(x: c.x + look.dx * 5.2, y: c.y + look.dy * 6.2)
+        let r = 7.4 * size * pose.pupil
+        let p = CGPoint(x: c.x + look.dx * 5.2 * size, y: c.y + look.dy * 6.2 * size)
         ctx.setFillColor(Ink.pupil)
         ctx.fillEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
         ctx.setFillColor(rgb(0xFFFFFF))
         ctx.fillEllipse(in: CGRect(x: p.x - r * 0.62, y: p.y - r * 0.66, width: r * 0.62, height: r * 0.62))
         ctx.fillEllipse(in: CGRect(x: p.x + r * 0.2, y: p.y + r * 0.22, width: r * 0.3, height: r * 0.3))
         ctx.restoreGState()
-        ctx.setStrokeColor(palette.outline)
+        ctx.setStrokeColor(outline)
         ctx.setLineWidth(2.6)
         ctx.strokeEllipse(in: white)
     }
@@ -531,6 +600,19 @@ enum PetRenderer {
             bolt.addLine(to: CGPoint(x: 0, y: -0.2 * s))
             bolt.closeSubpath()
             fill(bolt, Ink.bell, ctx)
+
+        case .bubble:
+            // A soap bubble wobbling up: pale fill, white rim, a glint.
+            let r = p.size * pop * (1 + 0.25 * t)
+            ctx.translateBy(x: sin(t * 9) * 2.5, y: 0)
+            let bubble = CGRect(x: -r, y: -r, width: r * 2, height: r * 2)
+            ctx.setFillColor(rgb(0xBFE9FF, 0.4))
+            ctx.fillEllipse(in: bubble)
+            ctx.setStrokeColor(rgb(0xFFFFFF, 0.95))
+            ctx.setLineWidth(1.3)
+            ctx.strokeEllipse(in: bubble)
+            ctx.setFillColor(rgb(0xFFFFFF, 0.95))
+            ctx.fillEllipse(in: CGRect(x: -r * 0.55, y: -r * 0.6, width: r * 0.42, height: r * 0.42))
 
         case .question:
             let s = p.size * pop

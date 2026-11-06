@@ -23,6 +23,8 @@ Scripts/build.sh --run  # 打包成 build/译喵.app 并启动
 swift run Yimiao --snapshot poses.png               # 各种姿势
 swift run Yimiao --looks looks.png                  # 毛色 × 装扮
 swift run Yimiao --hero hero.png                    # README 顶部那排猫
+swift run Yimiao --hero snake.png --snake           # 那排小蛇；--snapshot、--looks 也可以加 --snake
+swift run Yimiao --snapshot crab.png --crab         # 像素小蟹的姿势和他自己的小动作；--hero、--looks 也可以加 --crab
 swift run Yimiao --bubbles bubbles.png              # 气泡的各种状态
 swift run Yimiao --selection-layouts layouts.png    # 选区避让布局
 ```

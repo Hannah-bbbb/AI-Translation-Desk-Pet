@@ -65,6 +65,15 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 
 ![六种毛色，每行依次是不戴装扮、圣诞帽、巫师帽、春节红项圈，以及睡着时的睡帽](docs/images/looks.png)
 
+- **形象**：默认是只猫，也可以换成一条趴在地上的小蛇，或者一只像素小蟹。
+  - 小蛇的花色有薄荷绿、香蕉黄、樱花粉、晴空蓝、玉米蛇。一举一动和猫一样，只是没有耳朵：原本竖耳朵、耷拉耳朵的时候，他会抬头、低头；闲着时偶尔吐吐信子，发现你选中文字时也会吐一下。装扮也照戴，只是小一号。
+
+    ![五条不同花色的小蛇：盯着鼠标、翻译完开心蹦、发现选区吐信子、听歌、戴着睡帽睡觉](docs/images/snake.png)
+
+  - 像素小蟹是 12×8 个像素的方块：两只方眼睛、两只钳子、四条小短腿，动起来也一格一格的。竖耳朵、耷拉耳朵换成举钳子、放下钳子，蹲下就是腿变短。闲着时除了猫的那些小动作，他还会横着走两步再走回来、举起钳子咔嚓咔嚓、挥一只钳子打招呼、吐一串泡泡、原地蹦跶跳个舞，或者缩下去闭眼再弹起来。装扮换成像素版的圣诞帽、巫师帽、睡帽，春节是胸前的红领结。
+
+    ![像素小蟹：盯着鼠标、翻译完蹦起来、张开钳子、吐泡泡、戴着睡帽睡觉](docs/images/crab.png)
+
 - **毛色和装扮**：橘猫、黑猫、白猫、三花、奶牛猫、蓝猫。装扮默认按节日自动换：10 月 24 日到 11 月 1 日戴巫师帽，12 月 18 日到 26 日戴圣诞帽，农历腊月二十三到正月十五换红项圈和中国结；也可以固定一种或不戴。他睡着时会戴上睡帽。
 - **陪我玩**：鼠标在他面前快速左右来回晃几下才会触发，按住鼠标拖选时不算，所以正常工作时不会被误触。扑完他会在那儿多待几秒，你可以接着逗；不玩了他自己回去。
 - **陪你打字**：你打字时他的尾巴跟着拍、头一点一点；连续飞快地打一阵他会两眼放光；打了一段停下来想事情，他偶尔歪头看你。他只知道「有键按下」，不知道按的是哪个键，密码框里的输入系统也不会告诉他。
@@ -137,8 +146,8 @@ Kimi 模型与参数依据[官方模型列表](https://platform.kimi.com/docs/mo
 Sources/Yimiao/
   App/        PetController 把所有部件串起来；OverlayPanel 是透明悬浮窗
   Pet/        PetBrain 决定姿势（状态、弹簧、随机动作、扑鼠标、打字、跳舞、电量）
-              PetRenderer 画各个部件，PetStage 把部件做成图层交给 GPU 合成
-              Look 是毛色、装扮和节日日期
+              PetRenderer 画猫的各个部件，SnakeRenderer 画小蛇，CrabRenderer 画像素小蟹，
+              PetStage 把部件做成图层交给 GPU 合成；Look 是形象、毛色、小蛇花色、装扮和节日日期
   Bubble/     气泡的状态和 SwiftUI 视图
   Translate/  SelectionWatcher 取词，LanguageRouter 判断方向，Translator 流式请求
   Companion/  Companion 决定什么时候开口，Lines 是台词，Vocabulary 是生词本
@@ -156,6 +165,8 @@ swift run Yimiao --hero hero.png
 swift run Yimiao --bubbles bubbles.png
 swift run Yimiao --selection-layouts .build/selection-layouts.png
 ```
+
+在 `--snapshot`、`--looks`、`--hero` 后面加上 `--snake` 就画小蛇，加上 `--crab` 就画像素小蟹（`--snapshot --crab` 最后两行是他自己的小动作）。
 
 ## 隐私
 

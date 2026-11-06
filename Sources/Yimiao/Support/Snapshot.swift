@@ -114,8 +114,8 @@ enum Snapshot {
     }
 
     /// Drives a fresh brain through a few situations and lays the resulting poses out in a grid.
-    static func writeSheet(to path: String) {
-        let scenes: [(PetBrain) -> PetPose] = [
+    static func writeSheet(to path: String, look: PetLook = PetLook()) {
+        var scenes: [(PetBrain) -> PetPose] = [
             { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) },
             { run($0, 1.0, cursor: CGPoint(x: 220, y: 40)) },
             { run($0, 1.0, cursor: CGPoint(x: 0, y: -50)) },
@@ -163,6 +163,20 @@ enum Snapshot {
             { $0.recharged(); return run($0, 0.3) },
             { $0.ride = 900; return run($0, 0.6) },
         ]
+        if look.species == .crab {
+            // His own idle moves, caught mid-way.
+            let moves: [(PetBrain.Gesture, Double)] = [
+                (.scuttle, 0.45), (.scuttle, 0.75), (.pinch, 0.5), (.pinch, 0.68), (.wave, 0.6),
+                (.bubbles, 1.3), (.jig, 0.12), (.jig, 0.35), (.duck, 1.0), (.duck, 1.95),
+            ]
+            for (gesture, seconds) in moves {
+                scenes.append { brain in
+                    _ = run(brain, 0.2)
+                    brain.perform(gesture)
+                    return run(brain, seconds)
+                }
+            }
+        }
 
         let columns = 5
         let rows = (scenes.count + columns - 1) / columns
@@ -182,13 +196,13 @@ enum Snapshot {
                 alpha: 1
             ))
             ctx.fill(CGRect(origin: origin, size: cell))
-            draw(scene(PetBrain()), in: ctx, at: origin, scale: 1, density: 2)
+            draw(scene(brain(for: look.species)), in: ctx, at: origin, scale: 1, density: 2, look: look)
         }
         write(ctx, to: path)
     }
 
-    /// One row for the README: a different coat in each cell, each doing something else.
-    static func writeHero(to path: String) {
+    /// One row for the README: a different coat (or snake skin) in each cell, each doing something else.
+    static func writeHero(to path: String, species: Species = .cat) {
         let stalking: (PetBrain) -> PetPose = { brain in
             brain.mayPlay = true
             var pose = PetPose()
@@ -202,44 +216,68 @@ enum Snapshot {
             }
             return pose
         }
-        let cells: [(Coat, (PetBrain) -> PetPose)] = [
-            (.orange, { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) }),
-            (.calico, { $0.celebrate(); return run($0, 0.3) }),
-            (.black, stalking),
-            (.tuxedo, { $0.hearsMusic = true; return run($0, 2.75) }),
-            (.white, { $0.fallAsleep(); return run($0, 7.3) }),
+        let cells: [(PetLook, (PetBrain) -> PetPose)] = switch species {
+        case .cat: [
+            (PetLook(coat: .orange), { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) }),
+            (PetLook(coat: .calico), { $0.celebrate(); return run($0, 0.3) }),
+            (PetLook(coat: .black), stalking),
+            (PetLook(coat: .tuxedo), { $0.hearsMusic = true; return run($0, 2.75) }),
+            (PetLook(coat: .white), { $0.fallAsleep(); return run($0, 7.3) }),
         ]
+        case .snake: [
+            (PetLook(species: .snake, skin: .mint), { run($0, 1.0, cursor: CGPoint(x: -200, y: -160)) }),
+            (PetLook(species: .snake, skin: .banana), { $0.celebrate(); return run($0, 0.3) }),
+            (PetLook(species: .snake, skin: .sakura), { _ = run($0, 0.5); $0.notice(); return run($0, 0.15) }),
+            (PetLook(species: .snake, skin: .sky), { $0.hearsMusic = true; return run($0, 2.75) }),
+            (PetLook(species: .snake, skin: .corn), { $0.fallAsleep(); return run($0, 7.3) }),
+        ]
+        case .crab: [
+            (PetLook(species: .crab), { run($0, 1.0, cursor: CGPoint(x: -160, y: -220)) }),
+            (PetLook(species: .crab), { $0.celebrate(); return run($0, 0.3) }),
+            (PetLook(species: .crab), { $0.perform(.pinch); return run($0, 0.68) }),
+            (PetLook(species: .crab), { $0.perform(.bubbles); return run($0, 1.3) }),
+            (PetLook(species: .crab), { $0.fallAsleep(); return run($0, 7.3) }),
+        ]
+        }
         let cell = PetRenderer.canvas
-        let ctx = makeContext(width: cell.width * CGFloat(cells.count), height: cell.height, density: 2)
+        // The snake and the crab are low; leave out the empty sky above them.
+        let height = species == .cat ? cell.height : 130
+        let ctx = makeContext(width: cell.width * CGFloat(cells.count), height: height, density: 2)
         ctx.setFillColor(CGColor(srgbRed: 0.93, green: 0.95, blue: 0.97, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: cell.width * CGFloat(cells.count), height: cell.height))
-        for (index, (coat, scene)) in cells.enumerated() {
+        ctx.fill(CGRect(x: 0, y: 0, width: cell.width * CGFloat(cells.count), height: height))
+        for (index, (look, scene)) in cells.enumerated() {
             let origin = CGPoint(x: CGFloat(index) * cell.width, y: 0)
-            draw(scene(PetBrain()), in: ctx, at: origin, scale: 1, density: 2, look: PetLook(coat: coat))
+            draw(scene(brain(for: look.species)), in: ctx, at: origin, scale: 1, density: 2, look: look)
         }
         write(ctx, to: path)
     }
 
-    /// Every coat, bare and in each outfit, plus asleep in the nightcap.
-    static func writeLooks(to path: String) {
+    /// Every coat (or snake skin), bare and in each outfit, plus asleep in the nightcap.
+    static func writeLooks(to path: String, species: Species = .cat) {
         let outfits: [Outfit] = [.none, .santa, .witch, .newYear]
-        let awake = run(PetBrain(), 1.0, cursor: CGPoint(x: 60, y: -150))
+        let awake = run(brain(for: species), 1.0, cursor: CGPoint(x: 60, y: -150))
         let asleep: PetPose = {
-            let brain = PetBrain()
+            let brain = brain(for: species)
             brain.fallAsleep()
             return run(brain, 7)
         }()
+        let looks: [PetLook] = switch species {
+        case .cat: Coat.allCases.map { PetLook(coat: $0) }
+        case .snake: SnakeSkin.allCases.map { PetLook(species: .snake, skin: $0) }
+        case .crab: [PetLook(species: .crab)]
+        }
         let columns = outfits.count + 1
-        let rows = Coat.allCases.count
+        let rows = looks.count
         let cell = PetRenderer.canvas
         let ctx = makeContext(width: cell.width * CGFloat(columns), height: cell.height * CGFloat(rows), density: 2)
-        for (row, coat) in Coat.allCases.enumerated() {
+        for (row, base) in looks.enumerated() {
             let shade: CGFloat = row.isMultiple(of: 2) ? 0.93 : 0.36
             for column in 0..<columns {
                 let origin = CGPoint(x: CGFloat(column) * cell.width, y: CGFloat(rows - 1 - row) * cell.height)
                 ctx.setFillColor(CGColor(gray: shade + (column.isMultiple(of: 2) ? 0 : 0.04), alpha: 1))
                 ctx.fill(CGRect(origin: origin, size: cell))
-                let look = PetLook(coat: coat, outfit: column < outfits.count ? outfits[column] : .none)
+                var look = base
+                look.outfit = column < outfits.count ? outfits[column] : .none
                 draw(column < outfits.count ? awake : asleep, in: ctx, at: origin, scale: 1, density: 2, look: look)
             }
         }
@@ -290,6 +328,13 @@ enum Snapshot {
         ctx.translateBy(x: origin.x, y: origin.y)
         stage.layer.render(in: ctx)
         ctx.restoreGState()
+    }
+
+    /// A fresh brain that aims its gaze from where this animal's eyes are.
+    private static func brain(for species: Species) -> PetBrain {
+        let brain = PetBrain()
+        brain.anatomy = PetRenderer.anatomy(species)
+        return brain
     }
 
     private static func run(_ brain: PetBrain, _ seconds: Double, cursor: CGPoint = CGPoint(x: 40, y: -160)) -> PetPose {

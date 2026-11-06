@@ -3,7 +3,7 @@ import CoreGraphics
 /// Small things that float off the pet: snores, hearts, a "!" when he spots a selection,
 /// notes when he hears music, sparks of electricity when he is plugged in.
 struct Particle {
-    enum Kind { case zzz, heart, spark, alert, question, note, bolt }
+    enum Kind { case zzz, heart, spark, alert, question, note, bolt, bubble }
 
     var kind: Kind
     /// Design points relative to the feet; y grows downward.
@@ -47,5 +47,11 @@ struct PetPose {
     var sleep = 0.0
     /// Size of the snot bubble he blows while asleep, 0…1.
     var noseBubble = 0.0
+    /// How far the forked tongue is out, 0…1. Only the snake has one to show.
+    var tongue = 0.0
+    /// Sideways steps away from his spot, in design points, and claws open (1) or shut (0).
+    /// Only the crab scuttles and snaps.
+    var scuttle = 0.0
+    var claw = 0.0
     var particles: [Particle] = []
 }

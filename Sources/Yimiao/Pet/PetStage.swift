@@ -26,6 +26,7 @@ final class PetStage {
     private var scale: CGFloat = 0
     private var density: CGFloat = 0
     private var look = PetLook()
+    private var anatomy = PetRenderer.anatomy(.cat)
     /// The hat currently drawn into `hat`, if any.
     private var shownHat: Outfit.Hat?
 
@@ -56,16 +57,43 @@ final class PetStage {
         rig.position = CGPoint(x: 0, y: layer.bounds.height)
         rig.setAffineTransform(CGAffineTransform(scaleX: scale, y: -scale))
 
+        anatomy = PetRenderer.anatomy(look.species)
+        shadow.reshape(anatomy.shadowBox)
+        tail.reshape(anatomy.tailBox)
+        body.reshape(anatomy.bodyBox)
+        stripes.reshape(anatomy.stripesBox)
+        face.reshape(anatomy.faceBox)
+        earR.reshape(anatomy.earBox, anchor: anatomy.earPivot)
+        // Only the snake nods his markings and face along with his head.
+        stripes.layer.setAffineTransform(.identity)
+        face.layer.setAffineTransform(.identity)
+        // The cat's ears sit behind his body; the snake's head sits in front of his neck.
+        figure.insertSublayer(earR.layer, above: look.species == .snake ? body.layer : earL.layer)
+        particles.layer.position = CGPoint(x: PetRenderer.feet.x + anatomy.particleOffset.dx,
+                                           y: PetRenderer.feet.y + anatomy.particleOffset.dy)
         for part in [shadow, tail, earL, earR, body, stripes, face, hat, particles] {
             part.pixelsPerPoint = scale * density
             // Anything keyed on the pose has to be redrawn in the new colours too.
             part.forget()
         }
-        shadow.redraw(PetRenderer.drawShadow)
-        body.redraw { PetRenderer.drawBody(look, in: $0) }
-        stripes.redraw { PetRenderer.drawStripes(look.coat, in: $0) }
-        earR.redraw { PetRenderer.drawEar(look.coat, left: false, in: $0) }
-        earL.redraw { PetRenderer.drawEar(look.coat, left: true, in: $0) }
+        switch look.species {
+        case .cat:
+            shadow.redraw(PetRenderer.drawShadow)
+            body.redraw { PetRenderer.drawBody(look, in: $0) }
+            stripes.redraw { PetRenderer.drawStripes(look.coat, in: $0) }
+            earR.redraw { PetRenderer.drawEar(look.coat, left: false, in: $0) }
+            earL.redraw { PetRenderer.drawEar(look.coat, left: true, in: $0) }
+        case .snake:
+            shadow.redraw(SnakeRenderer.drawShadow)
+            body.redraw { SnakeRenderer.drawBody(look, in: $0) }
+            stripes.redraw { SnakeRenderer.drawPattern(look.skin, in: $0) }
+            earR.redraw { SnakeRenderer.drawHead(look.skin, in: $0) }
+            earL.clear()
+        case .crab:
+            // All of him is in the face layer; see `showCrab`.
+            shadow.redraw(CrabRenderer.drawShadow)
+            for part in [tail, earL, earR, body, stripes] { part.clear() }
+        }
         shownHat = nil
         hat.clear()
         CATransaction.commit()
@@ -75,6 +103,10 @@ final class PetStage {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
+        if look.species == .crab {
+            showCrab(pose)
+            return
+        }
 
         let height = (pose.lift / 60).clamped(0...1)
         shadow.layer.opacity = Float(1 - 0.5 * height)
@@ -87,7 +119,62 @@ final class PetStage {
                 .concatenating(CGAffineTransform(rotationAngle: pose.tilt))
         )
 
-        // Head turn: the face slides one way, the ears a little the other, the stripes in between.
+        switch look.species {
+        case .cat: showCatHead(pose)
+        case .snake: showSnakeHead(pose)
+        case .crab: break
+        }
+
+        // Keys are the pose rounded to steps too small to see, so a still pose costs nothing.
+        tail.redraw(ifChanged: [step(pose.tail, 250)]) { [look] in
+            switch look.species {
+            case .cat: PetRenderer.drawTail(angle: pose.tail, coat: look.coat, in: $0)
+            case .snake: SnakeRenderer.drawTail(angle: pose.tail, skin: look.skin, in: $0)
+            case .crab: break
+            }
+        }
+        var faceKey = [
+            step(pose.lookL.dx, 60), step(pose.lookL.dy, 60), step(pose.lookR.dx, 60), step(pose.lookR.dy, 60),
+            step(pose.eyeOpen, 100), step(pose.pupil, 60), pose.joy > 0.5 ? 1 : 0, step(pose.mouth, 60),
+            step(pose.blush, 25), step(pose.sleep, 40), step(pose.noseBubble, 40),
+        ]
+        // The cat has no tongue to show, so its flicks must not cost him redraws.
+        if look.species == .snake { faceKey.append(step(pose.tongue, 40)) }
+        face.redraw(ifChanged: faceKey) { [look] in
+            switch look.species {
+            case .cat: PetRenderer.drawFace(pose, coat: look.coat, in: $0)
+            case .snake: SnakeRenderer.drawFace(pose, skin: look.skin, in: $0)
+            case .crab: break
+            }
+        }
+        if pose.particles.isEmpty {
+            particles.clear()
+        } else {
+            particles.redraw { PetRenderer.drawParticles(pose.particles, in: $0) }
+        }
+    }
+
+    /// The pixel crab moves in pixel steps: no squash or roll, a hop that climbs a half pixel at
+    /// a time, and the rest redrawn only when a pixel changes.
+    private func showCrab(_ pose: PetPose) {
+        let lift = CrabRenderer.lift(pose.lift)
+        shadow.layer.opacity = Float(1 - 0.5 * (lift / 60).clamped(0...1))
+        shadow.layer.setAffineTransform(.identity)
+        figure.setAffineTransform(CGAffineTransform(translationX: 0, y: -lift))
+        let frame = CrabRenderer.frame(for: pose, outfit: look.outfit)
+        face.layer.position = .zero
+        face.redraw(ifChanged: frame.key) { CrabRenderer.draw(frame, in: $0) }
+        hat.clear()
+        shownHat = nil
+        if pose.particles.isEmpty {
+            particles.clear()
+        } else {
+            particles.redraw { PetRenderer.drawParticles(pose.particles, in: $0) }
+        }
+    }
+
+    /// Head turn: the face slides one way, the ears a little the other, the stripes in between.
+    private func showCatHead(_ pose: PetPose) {
         let turn = pose.face.dx
         let pivot = PetRenderer.earPivot
         earR.layer.position = CGPoint(x: pivot.x - turn * 1.5, y: pivot.y)
@@ -98,28 +185,35 @@ final class PetStage {
         )
         stripes.layer.position = CGPoint(x: turn * 3, y: 0)
         face.layer.position = CGPoint(x: turn * 4, y: pose.face.dy * 3)
-        showHat(pose, turn: turn)
+        // The hat slides with the turn and lifts a little when the ears perk up.
+        let perk = -(pose.earL + pose.earR) / 2
+        let seat = anatomy.hatSeat
+        showHat(pose, at: CGPoint(x: seat.x + turn * 3, y: seat.y - perk * 6), angle: (pose.earR - pose.earL) * 0.25)
+    }
 
-        // Keys are the pose rounded to steps too small to see, so a still pose costs nothing.
-        tail.redraw(ifChanged: [step(pose.tail, 250)]) { [look] in
-            PetRenderer.drawTail(angle: pose.tail, coat: look.coat, in: $0)
-        }
-        face.redraw(ifChanged: [
-            step(pose.lookL.dx, 60), step(pose.lookL.dy, 60), step(pose.lookR.dx, 60), step(pose.lookR.dy, 60),
-            step(pose.eyeOpen, 100), step(pose.pupil, 60), pose.joy > 0.5 ? 1 : 0, step(pose.mouth, 60),
-            step(pose.blush, 25), step(pose.sleep, 40), step(pose.noseBubble, 40),
-        ]) { [look] in
-            PetRenderer.drawFace(pose, coat: look.coat, in: $0)
-        }
-        if pose.particles.isEmpty {
-            particles.clear()
-        } else {
-            particles.redraw { PetRenderer.drawParticles(pose.particles, in: $0) }
-        }
+    /// The snake's head nods on his neck. Ears that would droop lower it (sleepy, tired, being
+    /// carried) and ears that would perk up raise it (spotting something); one ear back tips it.
+    private func showSnakeHead(_ pose: PetPose) {
+        let turn = pose.face.dx
+        let droop = (pose.earL + pose.earR) / 2
+        let angle = (-0.8 * droop + 0.3 * (pose.earR - pose.earL)).clamped(-0.32...0.32)
+        let drop = (droop * 22).clamped(-4...8)
+        let pivot = anatomy.earPivot
+        let nod = CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
+            .concatenating(CGAffineTransform(rotationAngle: angle))
+            .concatenating(CGAffineTransform(translationX: pivot.x, y: pivot.y + drop))
+        earR.layer.position = CGPoint(x: pivot.x + turn, y: pivot.y + drop)
+        earR.layer.setAffineTransform(CGAffineTransform(rotationAngle: angle))
+        stripes.layer.position = CGPoint(x: turn * 2, y: 0)
+        stripes.layer.setAffineTransform(nod)
+        face.layer.position = CGPoint(x: turn * 3, y: pose.face.dy * 2)
+        face.layer.setAffineTransform(nod)
+        let seat = anatomy.hatSeat.applying(nod)
+        showHat(pose, at: CGPoint(x: seat.x + turn * 2, y: seat.y), angle: angle)
     }
 
     /// His outfit's hat if it has one. Otherwise a nightcap that fades in as he drifts off.
-    private func showHat(_ pose: PetPose, turn: Double) {
+    private func showHat(_ pose: PetPose, at place: CGPoint, angle: Double) {
         let wanted: Outfit.Hat? = look.outfit.hat ?? (pose.sleep > 0.3 ? .nightcap : nil)
         if wanted != shownHat {
             shownHat = wanted
@@ -127,10 +221,8 @@ final class PetStage {
         }
         guard shownHat != nil else { return }
         hat.layer.opacity = look.outfit.hat == nil ? Float(ramp(pose.sleep, 0.3, 0.85)) : 1
-        // Rides on the head: slides with the turn and lifts a little when the ears perk up.
-        let perk = -(pose.earL + pose.earR) / 2
-        hat.layer.position = CGPoint(x: PetRenderer.crown.x + turn * 3, y: PetRenderer.crown.y - perk * 6)
-        hat.layer.setAffineTransform(CGAffineTransform(rotationAngle: (pose.earR - pose.earL) * 0.25))
+        hat.layer.position = place
+        hat.layer.setAffineTransform(CGAffineTransform(scaleX: anatomy.hatScale, y: anatomy.hatScale).rotated(by: angle))
     }
 
     private func step(_ value: Double, _ stepsPerUnit: Double) -> Int32 {
@@ -149,7 +241,7 @@ private final class Part {
         }
     }
 
-    private let box: CGRect
+    private var box: CGRect
     private var canvas: CGContext?
     private var key: [Int32]?
 
@@ -160,6 +252,19 @@ private final class Part {
         layer.bounds = box
         layer.anchorPoint = CGPoint(x: (anchor.x - box.minX) / box.width, y: (anchor.y - box.minY) / box.height)
         layer.position = anchor
+    }
+
+    /// Moves the part to a different box, for a different animal.
+    func reshape(_ newBox: CGRect, anchor: CGPoint = .zero) {
+        let anchorPoint = CGPoint(x: (anchor.x - newBox.minX) / newBox.width, y: (anchor.y - newBox.minY) / newBox.height)
+        guard newBox != box || anchorPoint != layer.anchorPoint else { return }
+        box = newBox
+        layer.bounds = newBox
+        // The anchor point keeps its place on the layer; whoever owns the part positions it.
+        layer.anchorPoint = anchorPoint
+        layer.setAffineTransform(.identity)
+        canvas = nil
+        key = nil
     }
 
     func redraw(ifChanged newKey: [Int32], _ paint: (CGContext) -> Void) {

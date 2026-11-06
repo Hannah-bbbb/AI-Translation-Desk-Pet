@@ -146,7 +146,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             }
             .store(in: &subscriptions)
         // `@Published` fires before the property changes, so read the new values on the next turn.
-        settings.$coat.combineLatest(settings.$outfit).dropFirst()
+        Publishers.CombineLatest4(settings.$species, settings.$coat, settings.$snakeSkin, settings.$outfit).dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.applyLook() }
             .store(in: &subscriptions)
@@ -776,7 +776,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
 
     // MARK: - Sitting on windows
 
-    private var seatHalfWidth: CGFloat { 62 * settings.petScale }
+    private var seatHalfWidth: CGFloat { (anatomy.halfWidth - 2) * settings.petScale }
 
     /// Nothing better to do: awake, at home, quiet.
     private var canWander: Bool {
@@ -866,9 +866,14 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     // MARK: - Looks
 
     private func applyLook() {
-        let look = PetLook(coat: settings.coat, outfit: settings.outfit.outfit(on: Date()))
+        let look = PetLook(coat: settings.coat, outfit: settings.outfit.outfit(on: Date()),
+                           species: settings.species, skin: settings.snakeSkin)
         guard look != petView.look else { return }
+        let reshaped = look.species != petView.look.species
         petView.look = look
+        brain.anatomy = anatomy
+        // The snake is wider than the cat; keep all of him on screen.
+        if reshaped { spot = onScreen(spot) }
         layoutBubble()
     }
 
@@ -878,10 +883,16 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         if lookCheck % 60 == 0 { applyLook() }
     }
 
+    /// The shape of the animal he is drawn as.
+    private var anatomy: PetRenderer.Anatomy { PetRenderer.anatomy(petView.look.species) }
+
     /// From his feet to the top of his ears, or of his hat, on screen.
     private var headHeight: CGFloat {
-        (PetRenderer.headTop + petView.look.outfit.extraHeight) * settings.petScale
+        anatomy.height(wearing: petView.look.outfit) * settings.petScale
     }
+
+    /// How far his head is to the side of his feet on screen; the bubble points at it.
+    private var headOffset: CGFloat { anatomy.headX * settings.petScale }
 
     // MARK: - Placement
 
@@ -913,7 +924,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
     /// or a display change would leave him stranded.
     private func onScreen(_ feet: CGPoint) -> CGPoint {
         PetGeometry.onScreen(feet, screens: NSScreen.screens.map(\.visibleFrame),
-                             halfWidth: 64 * settings.petScale, height: headHeight)
+                             halfWidth: anatomy.halfWidth * settings.petScale, height: headHeight)
     }
 
     private func screensChanged() {
@@ -957,7 +968,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         return SelectionPlacement.place(avoiding: selection, near: anchor, screens: screens,
                                         preferredSize: BubbleLayout.windowSize,
                                         petHead: settings.visitsSelection ? headHeight : 0,
-                                        petHalfWidth: settings.visitsSelection ? 64 * settings.petScale : 0)
+                                        petHalfWidth: settings.visitsSelection ? anatomy.halfWidth * settings.petScale : 0)
     }
 
     private func clearSelectionPlacement() {
@@ -987,7 +998,7 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
             if bubble.windowSize != placement.bubbleFrame.size { bubble.windowSize = placement.bubbleFrame.size }
             bubbleWindow.setFrame(placement.bubbleFrame, display: true)
             if bubble.isBelow != placement.isBelow { bubble.isBelow = placement.isBelow }
-            let tailX = placement.feet.x - placement.bubbleFrame.minX
+            let tailX = placement.feet.x + headOffset - placement.bubbleFrame.minX
             if bubble.tailX != tailX { bubble.tailX = tailX }
             bubbleWindow.alphaValue = leap == nil ? 1 : 0
             return
@@ -1005,12 +1016,12 @@ final class PetController: NSObject, PetViewDelegate, NSMenuDelegate {
         // At home the bubble sits on his head. Out visiting it hangs below him, clear of the
         // text he came over to translate.
         let below = isOut ? (roomBelow || !roomAbove) : !roomAbove
-        let x = (feet.x - size.width / 2).clamped(area.minX...max(area.minX, area.maxX - size.width))
+        let x = (feet.x + headOffset - size.width / 2).clamped(area.minX...max(area.minX, area.maxX - size.width))
         // The window's transparent margin overlaps the pet, so the tail ends right at his ears or paws.
         let y = below ? feet.y - 8 + margin - size.height : headTop + 2 - margin
         bubbleWindow.setFrameOrigin(CGPoint(x: x, y: y))
         if bubble.isBelow != below { bubble.isBelow = below }
-        let tailX = feet.x - x
+        let tailX = feet.x + headOffset - x
         if bubble.tailX != tailX { bubble.tailX = tailX }
     }
 
